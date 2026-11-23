@@ -1,0 +1,76 @@
+{
+  "ConfigVersion": 1,
+  "Enabled": true,
+  "ServerId": "hsgo-public-1",
+  "Season": {
+    "Enabled": true,
+    "AutoTransition": true,
+    "DurationDays": 30,
+    "NameFormat": "Season {number}",
+    "InitialSeasonNumber": 1,
+    "StartDate": "2026-12-01T00:00:00+03:00",
+    "Timezone": "Europe/Istanbul",
+    "PreseasonTracking": true,
+    "SeasonOverrideEndDate": null,
+    "LeaderboardBlacklistSteamIds": []
+  },
+  "Scoring": {
+    "Kill": 10,
+    "HeadshotBonus": 5,
+    "Assist": 4,
+    "Death": -3,
+    "BombPlant": 5,
+    "BombDefuse": 10,
+    "RoundWin": 3,
+    "BombDrop": -3,
+    "BombPickup": 0,
+    "Suicide": -10,
+    "FriendlyFirePenalty": 0,
+    "BombDropPenaltyMaxPerRound": 1
+  },
+  "Database": {
+    "Host": "127.0.0.1",
+    "Port": 3306,
+    "Name": "hsgo_stats",
+    "Username": "CHANGE_ME",
+    "Password": "CHANGE_ME",
+    "SslMode": "Preferred",
+    "ConnectionTimeoutSeconds": 5
+  },
+  "Tracking": {
+    "Kills": true,
+    "Deaths": true,
+    "Assists": true,
+    "Headshots": true,
+    "Damage": true,
+    "ShotsAndHits": false,
+    "Rounds": true,
+    "WinsAndLosses": true,
+    "Playtime": true,
+    "PerMap": true,
+    "PerWeapon": true,
+    "ExcludeBots": true,
+    "ExcludeWarmup": true,
+    "ExcludeTeamKills": true,
+    "ExcludeSuicidesFromKills": true
+  },
+  "Bans": {
+    "Enabled": true,
+    "AutoImportFromExistingAdminPlugin": false,
+    "AllowManualSqlImport": true,
+    "TrackNativeBanEventsIfVerified": false,
+    "ExposeBanEnforcement": false
+  },
+  "Persistence": {
+    "BatchIntervalSeconds": 10,
+    "MaxBatchSize": 100,
+    "MaxQueuedEvents": 5000,
+    "RetryMaxAttempts": 5,
+    "RetryInitialDelaySeconds": 2,
+    "PersistPendingEventsToDisk": true
+  },
+  "Logging": {
+    "Level": "Information",
+    "IncludePlayerNames": false
+  }
+}

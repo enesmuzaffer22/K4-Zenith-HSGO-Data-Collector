@@ -64,6 +64,7 @@ obj/
 
 Zenith
 *.zip
+!HsGoStats/HsGoStats-v*.zip
 
 CLAUDE.md
 **/.claude/settings.local.json

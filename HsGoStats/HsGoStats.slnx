@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/HsGoStats.csproj" />
+  <Project Path="tests/HsGoStats.Tests.csproj" />
+</Solution>
