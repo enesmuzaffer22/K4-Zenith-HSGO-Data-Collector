@@ -18,6 +18,9 @@ public sealed class PlayerSessionPipeline
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly TaskCompletionSource _replayReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task? _worker;
+    private long _enqueued;
+    private long _persisted;
+    private string? _lastFailure;
 
     public PlayerSessionPipeline(PlayerSessionRepository repository, PersistenceConfig config, string spoolPath,
         Action<string, Exception?> error)
@@ -32,7 +35,17 @@ public sealed class PlayerSessionPipeline
         _worker = Task.Run(RunAsync);
         await _replayReady.Task.WaitAsync(token);
     }
-    public bool TryEnqueue(PlayerSessionSignal signal) => _channel.Writer.TryWrite(signal);
+    public long EnqueuedEvents => Interlocked.Read(ref _enqueued);
+    public long PersistedEvents => Interlocked.Read(ref _persisted);
+    public bool IsRunning => _worker is { IsCompleted: false };
+    public string? LastFailure => Volatile.Read(ref _lastFailure);
+
+    public bool TryEnqueue(PlayerSessionSignal signal)
+    {
+        if (!_channel.Writer.TryWrite(signal)) return false;
+        Interlocked.Increment(ref _enqueued);
+        return true;
+    }
 
     public async Task StopAsync(TimeSpan timeout)
     {
@@ -59,14 +72,21 @@ public sealed class PlayerSessionPipeline
                         await AppendAsync(signal, _stop.Token);
                         batch.Add(signal);
                     }
-                    if (batch.Count >= _config.MaxBatchSize || DateTimeOffset.UtcNow >= deadline || _channel.Reader.Completion.IsCompleted) break;
-                    await Task.WhenAny(_channel.Reader.WaitToReadAsync(_stop.Token).AsTask(), Task.Delay(deadline - DateTimeOffset.UtcNow, _stop.Token));
+                    if (batch.Count >= _config.MaxBatchSize || _channel.Reader.Completion.IsCompleted) break;
+                    var remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining <= TimeSpan.Zero) break;
+                    await Task.WhenAny(_channel.Reader.WaitToReadAsync(_stop.Token).AsTask(), Task.Delay(remaining, _stop.Token));
                 }
                 if (batch.Count > 0) await PersistAsync(batch, _stop.Token);
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { _replayReady.TrySetCanceled(_stop.Token); }
-        catch (Exception ex) { _replayReady.TrySetException(ex); _error("Player session worker stopped unexpectedly.", ex); }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _lastFailure, $"{ex.GetType().Name}: {ex.Message}");
+            _replayReady.TrySetException(ex);
+            _error("Player session worker stopped unexpectedly.", ex);
+        }
     }
 
     private async Task PersistAsync(IReadOnlyCollection<PlayerSessionSignal> signals, CancellationToken token)
@@ -74,7 +94,13 @@ public sealed class PlayerSessionPipeline
         Exception? last = null;
         for (var attempt = 1; attempt <= _config.RetryMaxAttempts; attempt++)
         {
-            try { await _repository.ProcessBatchAsync(signals, token); await AcknowledgeAsync(signals.Select(x => x.EventId), token); return; }
+            try
+            {
+                await _repository.ProcessBatchAsync(signals, token);
+                await AcknowledgeAsync(signals.Select(x => x.EventId), token);
+                Interlocked.Add(ref _persisted, signals.Count);
+                return;
+            }
             catch (Exception ex) when (attempt < _config.RetryMaxAttempts)
             {
                 last = ex;

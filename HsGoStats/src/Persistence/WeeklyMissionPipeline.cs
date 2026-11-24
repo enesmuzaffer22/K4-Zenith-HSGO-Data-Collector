@@ -17,6 +17,9 @@ public sealed class WeeklyMissionPipeline
     private readonly Dictionary<Guid, MissionSignal> _pending = [];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private Task? _worker;
+    private long _enqueued;
+    private long _persisted;
+    private string? _lastFailure;
 
     public WeeklyMissionPipeline(WeeklyMissionRepository repository, PersistenceConfig config, string spoolPath, Action<string, Exception?> error)
     {
@@ -26,7 +29,17 @@ public sealed class WeeklyMissionPipeline
     }
 
     public void Start() => _worker = Task.Run(RunAsync);
-    public bool TryEnqueue(MissionSignal signal) => _channel.Writer.TryWrite(signal);
+    public long EnqueuedEvents => Interlocked.Read(ref _enqueued);
+    public long PersistedEvents => Interlocked.Read(ref _persisted);
+    public bool IsRunning => _worker is { IsCompleted: false };
+    public string? LastFailure => Volatile.Read(ref _lastFailure);
+
+    public bool TryEnqueue(MissionSignal signal)
+    {
+        if (!_channel.Writer.TryWrite(signal)) return false;
+        Interlocked.Increment(ref _enqueued);
+        return true;
+    }
 
     public async Task StopAsync(TimeSpan timeout)
     {
@@ -52,14 +65,20 @@ public sealed class WeeklyMissionPipeline
                         await AppendAsync(signal, _stop.Token);
                         batch.Add(signal);
                     }
-                    if (batch.Count >= _config.MaxBatchSize || DateTimeOffset.UtcNow >= deadline || _channel.Reader.Completion.IsCompleted) break;
-                    await Task.WhenAny(_channel.Reader.WaitToReadAsync(_stop.Token).AsTask(), Task.Delay(deadline - DateTimeOffset.UtcNow, _stop.Token));
+                    if (batch.Count >= _config.MaxBatchSize || _channel.Reader.Completion.IsCompleted) break;
+                    var remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining <= TimeSpan.Zero) break;
+                    await Task.WhenAny(_channel.Reader.WaitToReadAsync(_stop.Token).AsTask(), Task.Delay(remaining, _stop.Token));
                 }
                 if (batch.Count > 0) await PersistAsync(batch, _stop.Token);
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
-        catch (Exception ex) { _error("Weekly mission worker stopped unexpectedly.", ex); }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _lastFailure, $"{ex.GetType().Name}: {ex.Message}");
+            _error("Weekly mission worker stopped unexpectedly.", ex);
+        }
     }
 
     private async Task PersistAsync(IReadOnlyCollection<MissionSignal> signals, CancellationToken token)
@@ -67,7 +86,13 @@ public sealed class WeeklyMissionPipeline
         Exception? last = null;
         for (var attempt = 1; attempt <= _config.RetryMaxAttempts; attempt++)
         {
-            try { await _repository.ProcessBatchAsync(signals, token); await AcknowledgeAsync(signals.Select(x => x.EventId), token); return; }
+            try
+            {
+                await _repository.ProcessBatchAsync(signals, token);
+                await AcknowledgeAsync(signals.Select(x => x.EventId), token);
+                Interlocked.Add(ref _persisted, signals.Count);
+                return;
+            }
             catch (Exception ex) when (attempt < _config.RetryMaxAttempts)
             {
                 last = ex;

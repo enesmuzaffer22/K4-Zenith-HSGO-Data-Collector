@@ -1,4 +1,4 @@
-# HSGo Stats Collector 1.3.0
+# HSGo Stats Collector 1.3.2
 
 Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, HSR ve haftalık görev eklentisidir. Zenith, menü, admin, rank veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. HUD, clan tag, skor tablosu, skin, ConVar veya ban enforcement eklemez.
 

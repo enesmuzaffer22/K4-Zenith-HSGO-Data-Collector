@@ -15,6 +15,9 @@ public sealed class EventPipeline
     private readonly CancellationTokenSource _stop = new();
     private Task? _worker;
     private long _dropped;
+    private long _enqueued;
+    private long _persisted;
+    private string? _lastFailure;
 
     public EventPipeline(MySqlStore store, DurableSpool spool, PersistenceConfig config, Action<string> info, Action<string, Exception?> error)
     {
@@ -32,12 +35,20 @@ public sealed class EventPipeline
     }
 
     public long DroppedEvents => Interlocked.Read(ref _dropped);
+    public long EnqueuedEvents => Interlocked.Read(ref _enqueued);
+    public long PersistedEvents => Interlocked.Read(ref _persisted);
+    public bool IsRunning => _worker is { IsCompleted: false };
+    public string? LastFailure => Volatile.Read(ref _lastFailure);
 
     public void Start() => _worker = Task.Run(RunAsync);
 
     public bool TryEnqueue(NormalizedStatEvent item)
     {
-        if (_channel.Writer.TryWrite(item)) return true;
+        if (_channel.Writer.TryWrite(item))
+        {
+            Interlocked.Increment(ref _enqueued);
+            return true;
+        }
         var dropped = Interlocked.Increment(ref _dropped);
         if (dropped == 1 || dropped % 100 == 0) _error($"Statistics queue is full; dropped event count: {dropped}.", null);
         return false;
@@ -77,8 +88,9 @@ public sealed class EventPipeline
                         await _spool.AppendAsync(item, _stop.Token);
                         batch.Add(item);
                     }
-                    if (batch.Count >= _config.MaxBatchSize || DateTimeOffset.UtcNow >= deadline || _channel.Reader.Completion.IsCompleted) break;
+                    if (batch.Count >= _config.MaxBatchSize || _channel.Reader.Completion.IsCompleted) break;
                     var remaining = deadline - DateTimeOffset.UtcNow;
+                    if (remaining <= TimeSpan.Zero) break;
                     var ready = _channel.Reader.WaitToReadAsync(_stop.Token).AsTask();
                     await Task.WhenAny(ready, Task.Delay(remaining, _stop.Token));
                 }
@@ -86,7 +98,11 @@ public sealed class EventPipeline
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
-        catch (Exception ex) { _error("Statistics persistence worker stopped unexpectedly.", ex); }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _lastFailure, $"{ex.GetType().Name}: {ex.Message}");
+            _error("Statistics persistence worker stopped unexpectedly.", ex);
+        }
     }
 
     private async Task PersistWithRetryAsync(IReadOnlyCollection<NormalizedStatEvent> batch, bool alreadySpooled, CancellationToken token)
@@ -97,8 +113,9 @@ public sealed class EventPipeline
         {
             try
             {
-                await _store.WriteBatchAsync(batch, token);
+                var applied = await _store.WriteBatchAsync(batch, token);
                 await _spool.AcknowledgeAsync(batch.Select(x => x.EventId), token);
+                Interlocked.Add(ref _persisted, applied);
                 return;
             }
             catch (Exception ex) when (attempt < _config.RetryMaxAttempts)
