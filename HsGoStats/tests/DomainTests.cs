@@ -1,6 +1,7 @@
 using HsGoStats.Configuration;
 using HsGoStats.Domain;
 using HsGoStats.Persistence;
+using System.Text.Json;
 using Xunit;
 
 namespace HsGoStats.Tests;
@@ -31,9 +32,10 @@ public sealed class DomainTests
     [Fact]
     public void InvalidSeasonBlacklistSteamIdIsRejected()
     {
-        var config = new HsGoStatsConfig();
-        config.Season.LeaderboardBlacklistSteamIds.Add("not-a-steamid");
-        var result = ConfigValidator.Validate(config);
+        var config = ValidConfig();
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Season.LeaderboardBlacklistSteamIds.Add("not-a-steamid");
+        var result = ConfigValidator.Validate(config, settings);
         Assert.Contains(result.Errors, value => value.Contains("LeaderboardBlacklistSteamIds"));
     }
 
@@ -51,13 +53,14 @@ public sealed class DomainTests
     public void ManualSeasonScheduleAllowsCustomNamesAndGaps()
     {
         var config = ValidConfig();
-        config.Season.Schedule =
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Season.Schedule =
         [
             new("Kış Ligi", "2026-12-01T12:30:00+03:00", "2026-12-20T18:00:00+03:00"),
             new("Yeni Yıl Kupası", "2027-01-05T00:00:00+03:00", "2027-02-14T21:45:00+03:00")
         ];
 
-        var result = ConfigValidator.Validate(config);
+        var result = ConfigValidator.Validate(config, settings);
 
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
@@ -66,13 +69,14 @@ public sealed class DomainTests
     public void OverlappingManualSeasonsAreRejected()
     {
         var config = ValidConfig();
-        config.Season.Schedule =
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Season.Schedule =
         [
             new("Bir", "2026-12-01T00:00:00+03:00", "2027-01-01T00:00:00+03:00"),
             new("İki", "2026-12-31T00:00:00+03:00", "2027-02-01T00:00:00+03:00")
         ];
 
-        var result = ConfigValidator.Validate(config);
+        var result = ConfigValidator.Validate(config, settings);
 
         Assert.Contains(result.Errors, value => value.Contains("overlaps"));
     }
@@ -81,9 +85,10 @@ public sealed class DomainTests
     public void ManualSeasonDatesRequireExplicitOffsets()
     {
         var config = ValidConfig();
-        config.Season.Schedule = [new("Ofsetsiz", "2026-12-01T00:00:00", "2026-12-31T00:00:00")];
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Season.Schedule = [new("Ofsetsiz", "2026-12-01T00:00:00", "2026-12-31T00:00:00")];
 
-        var result = ConfigValidator.Validate(config);
+        var result = ConfigValidator.Validate(config, settings);
 
         Assert.Contains(result.Errors, value => value.Contains("explicit offset"));
     }
@@ -131,6 +136,59 @@ public sealed class DomainTests
     }
 
     [Fact]
+    public void LocalBootstrapConfigDoesNotExposeRuntimeSections()
+    {
+        Assert.NotNull(typeof(HsGoStatsConfig).GetProperty(nameof(HsGoStatsConfig.Database)));
+        Assert.NotNull(typeof(HsGoStatsConfig).GetProperty(nameof(HsGoStatsConfig.SettingsStore)));
+        Assert.Null(typeof(HsGoStatsConfig).GetProperty("Season"));
+        Assert.Null(typeof(HsGoStatsConfig).GetProperty("WeeklyMissions"));
+        Assert.Null(typeof(HsGoStatsConfig).GetProperty("Scoring"));
+    }
+
+    [Fact]
+    public void LegacyJsonRuntimeSectionsSeedDatabaseSettings()
+    {
+        const string json = """
+            {
+              "ServerId":"legacy-server",
+              "Enabled":false,
+              "Season":{"Enabled":true,"Timezone":"UTC","PreseasonTracking":false}
+            }
+            """;
+
+        var bootstrap = JsonSerializer.Deserialize<HsGoStatsConfig>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            { PropertyNameCaseInsensitive = true })!;
+        var seed = bootstrap.CreateRuntimeSeed();
+
+        Assert.False(seed.Enabled);
+        Assert.Equal("UTC", seed.Season.Timezone);
+        Assert.False(seed.Season.PreseasonTracking);
+    }
+
+    [Fact]
+    public void PlayerSessionSignalRoundTripsThroughDurableJson()
+    {
+        var original = new PlayerSessionSignal(Guid.NewGuid(), Guid.NewGuid(), DateTimeOffset.Parse("2026-11-24T12:00:00Z"),
+            new PlayerIdentity(76561198000000001, "Test"), PlayerSessionSignalType.Heartbeat);
+
+        var restored = JsonSerializer.Deserialize<PlayerSessionSignal>(JsonSerializer.Serialize(original, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.Equal(original, restored);
+    }
+
+    [Fact]
+    public void SchemaContainsDatabaseSettingsAndPlayerSessions()
+    {
+        var type = typeof(MySqlStore).Assembly.GetType("HsGoStats.Persistence.SchemaSql")!;
+        var commands = (string[])type.GetField("Commands", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public)!.GetValue(null)!;
+        var schema = string.Join("\n", commands);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS hsgo_plugin_settings", schema);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS hsgo_player_sessions", schema);
+        Assert.Contains("VALUES (1), (2), (3), (4), (5)", schema);
+    }
+
+    [Fact]
     public void WeeklyCatalogContainsExactProductSet()
     {
         var catalog = MissionCatalogDefaults.Create();
@@ -143,9 +201,9 @@ public sealed class DomainTests
     [Fact]
     public void RestrictedMissionWeaponsAreNotUsed()
     {
-        var config = new HsGoStatsConfig();
-        var excluded = config.WeeklyMissions.ExcludedMissionWeapons.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        Assert.DoesNotContain(config.WeeklyMissions.Catalog.SelectMany(x => x.Weapons), excluded.Contains);
+        var settings = new HsGoStatsRuntimeSettings();
+        var excluded = settings.WeeklyMissions.ExcludedMissionWeapons.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain(settings.WeeklyMissions.Catalog.SelectMany(x => x.Weapons), excluded.Contains);
     }
 
     [Fact]
@@ -238,7 +296,7 @@ public sealed class DomainTests
         var config = new HsGoStatsConfig();
         config.Database.Username = "test";
         config.Database.Password = "test";
-        var result = ConfigValidator.Validate(config);
+        var result = ConfigValidator.Validate(config, new HsGoStatsRuntimeSettings());
         Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 

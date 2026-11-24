@@ -12,4 +12,6 @@
 - Queue taşmasında oyun thread'i bloklanmaz; event düşürülür ve sayılı error log oluşur.
 - Corrupt spool satırları atlanır; otomatik veri tahmini yapılmaz.
 - `hsgo_ingested_events` retention otomatik değildir.
+- DB ayarları yaklaşık 30 saniyede yenilenir. Persistence queue/spool kapasitesi ve kaldırılmış eski komut alias'ları tamamen plugin/server reload sonrasında uygulanır.
+- Oturum heartbeat'i dakikada birdir. Ani süreç/host çökmesinde son heartbeat ile gerçek kopma arasındaki en fazla yaklaşık bir dakikalık bölüm kesin değildir; sunucunun kapalı kaldığı süre oturuma eklenmez.
 - Native/başka plugin ban import ve enforcement **NOT SUPPORTED / NOT TESTED**.

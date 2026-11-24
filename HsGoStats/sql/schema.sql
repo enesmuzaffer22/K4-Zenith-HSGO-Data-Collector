@@ -1,8 +1,23 @@
--- HSGo Stats schema v4 (plugin 1.2.0). No DROP, TRUNCATE, or non-hsgo_ table is used.
+-- HSGo Stats schema v5 (plugin 1.3.0). No DROP, TRUNCATE, or non-hsgo_ table is used.
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 CREATE TABLE IF NOT EXISTS hsgo_schema_migrations (version INT NOT NULL PRIMARY KEY, applied_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS hsgo_players (steam_id64 BIGINT UNSIGNED NOT NULL PRIMARY KEY, last_name VARCHAR(128) NULL, first_seen_at DATETIME(6) NOT NULL, last_seen_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS hsgo_plugin_settings (
+  server_id VARCHAR(64) NOT NULL, setting_key VARCHAR(64) NOT NULL, setting_json LONGTEXT NOT NULL,
+  description VARCHAR(255) NULL, revision BIGINT UNSIGNED NOT NULL DEFAULT 1, updated_by VARCHAR(128) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY(server_id,setting_key), KEY ix_hsgo_plugin_settings_updated(server_id,updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS hsgo_player_sessions (
+  session_id BINARY(16) NOT NULL PRIMARY KEY, server_id VARCHAR(64) NOT NULL, steam_id64 BIGINT UNSIGNED NOT NULL,
+  connected_at_utc DATETIME(6) NOT NULL, last_seen_at_utc DATETIME(6) NOT NULL, disconnected_at_utc DATETIME(6) NULL,
+  duration_seconds BIGINT UNSIGNED NULL, close_reason VARCHAR(32) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), updated_at DATETIME(6) NOT NULL,
+  KEY ix_hsgo_sessions_server_connected(server_id,connected_at_utc), KEY ix_hsgo_sessions_server_seen(server_id,last_seen_at_utc),
+  KEY ix_hsgo_sessions_player_seen(server_id,steam_id64,last_seen_at_utc),
+  CONSTRAINT ck_hsgo_session_window CHECK(disconnected_at_utc IS NULL OR disconnected_at_utc>=connected_at_utc)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS hsgo_seasons (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY, season_number INT NOT NULL, name VARCHAR(128) NOT NULL,
   status ENUM('scheduled','active','completed') NOT NULL, starts_at_utc DATETIME(6) NOT NULL, ends_at_utc DATETIME(6) NOT NULL,
@@ -103,4 +118,4 @@ CREATE TABLE IF NOT EXISTS hsgo_mission_events (
   event_type VARCHAR(48) NOT NULL, observed_at DATETIME(6) NOT NULL, ingested_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   KEY ix_hsgo_mission_events_observed(observed_at), KEY ix_hsgo_mission_events_player(server_id,steam_id64,observed_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-INSERT IGNORE INTO hsgo_schema_migrations(version) VALUES(1),(2),(3),(4);
+INSERT IGNORE INTO hsgo_schema_migrations(version) VALUES(1),(2),(3),(4),(5);

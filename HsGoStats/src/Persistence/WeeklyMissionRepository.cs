@@ -6,7 +6,7 @@ using MySqlConnector;
 
 namespace HsGoStats.Persistence;
 
-public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig config)
+public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSettings config, string serverId)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -66,7 +66,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
             ORDER BY a.category
             """;
         await using var command = new MySqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@steam", steamId);
         command.Parameters.AddWithValue("@now", now.UtcDateTime);
         await using var reader = await command.ExecuteReaderAsync(token);
@@ -90,7 +90,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         await using (var hsrCommand = new MySqlCommand(hsrSql, connection))
         {
             hsrCommand.Parameters.AddWithValue("@season", season.Id);
-            hsrCommand.Parameters.AddWithValue("@server", config.ServerId);
+            hsrCommand.Parameters.AddWithValue("@server", serverId);
             hsrCommand.Parameters.AddWithValue("@steam", steamId);
             var value = await hsrCommand.ExecuteScalarAsync(token);
             if (value is null) return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc, 0, null, 0);
@@ -111,7 +111,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
             """;
         await using var rankCommand = new MySqlCommand(rankSql, connection);
         rankCommand.Parameters.AddWithValue("@season", season.Id);
-        rankCommand.Parameters.AddWithValue("@server", config.ServerId);
+        rankCommand.Parameters.AddWithValue("@server", serverId);
         rankCommand.Parameters.AddWithValue("@steam", steamId);
         rankCommand.Parameters.AddWithValue("@hsr", hsr);
         rankCommand.Parameters.AddWithValue("@number", season.Number);
@@ -133,7 +133,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         await using (var command = new MySqlCommand(sql, connection, transaction))
         {
             command.Parameters.AddWithValue("@window", windowId);
-            command.Parameters.AddWithValue("@server", config.ServerId);
+            command.Parameters.AddWithValue("@server", serverId);
             command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
             await using var reader = await command.ExecuteReaderAsync(token);
             while (await reader.ReadAsync(token))
@@ -181,7 +181,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
                     ORDER BY w.starts_at_utc DESC LIMIT 1
                     """;
                 await using var previous = new MySqlCommand(previousSql, connection, transaction);
-                previous.Parameters.AddWithValue("@server", config.ServerId);
+                previous.Parameters.AddWithValue("@server", serverId);
                 previous.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
                 previous.Parameters.AddWithValue("@category", category);
                 previous.Parameters.AddWithValue("@window", windowId);
@@ -196,7 +196,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
                 """;
             await using var command = new MySqlCommand(sql, connection, transaction);
             command.Parameters.AddWithValue("@window", windowId);
-            command.Parameters.AddWithValue("@server", config.ServerId);
+            command.Parameters.AddWithValue("@server", serverId);
             command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
             command.Parameters.AddWithValue("@category", category);
             command.Parameters.AddWithValue("@mission", selected.Id);
@@ -214,7 +214,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         const string sql = "SELECT id,ends_at_utc FROM hsgo_weekly_windows WHERE season_id=@season AND server_id=@server AND starts_at_utc<=@at AND ends_at_utc>@at ORDER BY starts_at_utc DESC LIMIT 1 FOR UPDATE";
         await using var command = new MySqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("@season", seasonId);
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@at", at.UtcDateTime);
         await using var reader = await command.ExecuteReaderAsync(token);
         return await reader.ReadAsync(token) ? (reader.GetInt64(0), Utc(reader.GetDateTime(1))) : null;
@@ -225,7 +225,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         const string sql = "INSERT IGNORE INTO hsgo_weekly_windows(season_id,server_id,starts_at_utc,ends_at_utc,timezone) VALUES(@season,@server,@start,@end,@zone)";
         await using var command = new MySqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("@season", seasonId);
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@start", window.StartsAtUtc.UtcDateTime);
         command.Parameters.AddWithValue("@end", window.EndsAtUtc.UtcDateTime);
         command.Parameters.AddWithValue("@zone", window.Timezone);
@@ -239,7 +239,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         var sql = $"INSERT INTO {table}({identities},hsr,updated_at) VALUES({values},GREATEST(@minimum,@reward),@at) ON DUPLICATE KEY UPDATE hsr=GREATEST(@minimum,hsr+@reward),updated_at=VALUES(updated_at)";
         await using var command = new MySqlCommand(sql, connection, transaction);
         if (seasonal) command.Parameters.AddWithValue("@season", signal.ActiveSeasonId);
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
         command.Parameters.AddWithValue("@reward", reward);
         command.Parameters.AddWithValue("@minimum", config.Rating.MinimumXP);
@@ -264,7 +264,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         var sql = $"INSERT INTO {table}({identities},hsr,updated_at) VALUES({values},GREATEST(@minimum,@delta),@at) ON DUPLICATE KEY UPDATE hsr=GREATEST(@minimum,{update}),updated_at=VALUES(updated_at)";
         await using var command = new MySqlCommand(sql, connection, transaction);
         if (seasonal) command.Parameters.AddWithValue("@season", signal.ActiveSeasonId);
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
         command.Parameters.AddWithValue("@delta", signal.HsrDelta);
         command.Parameters.AddWithValue("@minimum", config.Rating.MinimumXP);
@@ -277,7 +277,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsConfig co
         const string sql = "INSERT IGNORE INTO hsgo_mission_events(event_id,server_id,steam_id64,event_type,observed_at) VALUES(UUID_TO_BIN(@id),@server,@steam,@type,@at)";
         await using var command = new MySqlCommand(sql, connection, transaction);
         command.Parameters.AddWithValue("@id", signal.EventId.ToString("D"));
-        command.Parameters.AddWithValue("@server", config.ServerId);
+        command.Parameters.AddWithValue("@server", serverId);
         command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
         command.Parameters.AddWithValue("@type", signal.Event);
         command.Parameters.AddWithValue("@at", signal.ObservedAt.UtcDateTime);

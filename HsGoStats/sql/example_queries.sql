@@ -31,3 +31,28 @@ SELECT a.category,a.mission_id,a.definition_json,a.progress,a.target,a.reward_xp
 FROM hsgo_weekly_assignments a JOIN hsgo_weekly_windows w ON w.id=a.window_id
 WHERE a.server_id=:server_id AND a.steam_id64=:steam_id64 AND w.starts_at_utc<=UTC_TIMESTAMP() AND w.ends_at_utc>UTC_TIMESTAMP()
 ORDER BY a.category;
+
+-- Admin panel: list database-backed plugin settings. Parse setting_json according to setting_key.
+SELECT setting_key,setting_json,description,revision,updated_by,updated_at
+FROM hsgo_plugin_settings WHERE server_id=:server_id ORDER BY setting_key;
+
+-- Admin panel: optimistic update. The plugin notices revision changes within roughly 30 seconds.
+UPDATE hsgo_plugin_settings
+SET setting_json=:setting_json,revision=revision+1,updated_by=:admin_identity,updated_at=UTC_TIMESTAMP(6)
+WHERE server_id=:server_id AND setting_key=:setting_key AND revision=:expected_revision
+  AND JSON_VALID(:setting_json);
+
+-- Server activity during the trailing 24 hours.
+-- average_session_seconds is the average elapsed duration of sessions that started in that window.
+SELECT
+  COUNT(DISTINCT CASE
+    WHEN connected_at_utc<UTC_TIMESTAMP() AND COALESCE(disconnected_at_utc,last_seen_at_utc)>=UTC_TIMESTAMP()-INTERVAL 24 HOUR
+    THEN steam_id64 END) AS unique_players_24h,
+  SUM(CASE WHEN connected_at_utc>=UTC_TIMESTAMP()-INTERVAL 24 HOUR AND connected_at_utc<UTC_TIMESTAMP() THEN 1 ELSE 0 END) AS sessions_started_24h,
+  COALESCE(AVG(CASE
+    WHEN connected_at_utc>=UTC_TIMESTAMP()-INTERVAL 24 HOUR AND connected_at_utc<UTC_TIMESTAMP()
+    THEN GREATEST(0,TIMESTAMPDIFF(MICROSECOND,connected_at_utc,LEAST(COALESCE(disconnected_at_utc,last_seen_at_utc),UTC_TIMESTAMP()))/1000000.0)
+    END),0) AS average_session_seconds_24h
+FROM hsgo_player_sessions
+WHERE server_id=:server_id AND connected_at_utc<UTC_TIMESTAMP()
+  AND COALESCE(disconnected_at_utc,last_seen_at_utc)>=UTC_TIMESTAMP()-INTERVAL 24 HOUR;

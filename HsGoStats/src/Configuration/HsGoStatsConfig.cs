@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using CounterStrikeSharp.API.Core;
 
@@ -5,15 +6,53 @@ namespace HsGoStats.Configuration;
 
 public sealed class HsGoStatsConfig : BasePluginConfig
 {
-    public bool Enabled { get; set; } = true;
     public string ServerId { get; set; } = "hsgo-public-1";
+    public DatabaseSettingsStoreConfig SettingsStore { get; set; } = new();
+    public DatabaseConfig Database { get; set; } = new();
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? LegacyRuntimeSettings { get; set; }
+
+    public HsGoStatsRuntimeSettings CreateRuntimeSeed()
+    {
+        var result = new HsGoStatsRuntimeSettings();
+        if (LegacyRuntimeSettings is null) return result;
+        result.Enabled = ReadLegacy("Enabled", result.Enabled);
+        result.Season = ReadLegacy("Season", result.Season);
+        result.Scoring = ReadLegacy("Scoring", result.Scoring);
+        result.GameXp = ReadLegacy("GameXp", result.GameXp);
+        result.Rating = ReadLegacy("Rating", result.Rating);
+        result.WeeklyMissions = ReadLegacy("WeeklyMissions", result.WeeklyMissions);
+        result.ChatCommands = ReadLegacy("ChatCommands", result.ChatCommands);
+        result.Tracking = ReadLegacy("Tracking", result.Tracking);
+        result.Bans = ReadLegacy("Bans", result.Bans);
+        result.Persistence = ReadLegacy("Persistence", result.Persistence);
+        result.Logging = ReadLegacy("Logging", result.Logging);
+        return result;
+    }
+
+    private T ReadLegacy<T>(string key, T fallback)
+    {
+        var row = LegacyRuntimeSettings!.FirstOrDefault(x => x.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrEmpty(row.Key)) return fallback;
+        return row.Value.Deserialize<T>(new JsonSerializerOptions(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException($"Legacy JSON section '{key}' cannot be null.");
+    }
+}
+
+public sealed class DatabaseSettingsStoreConfig
+{
+    public bool SeedMissingRows { get; set; } = true;
+}
+
+public sealed class HsGoStatsRuntimeSettings
+{
+    public bool Enabled { get; set; } = true;
     public SeasonConfig Season { get; set; } = new();
     public ScoringConfig Scoring { get; set; } = new();
     public GameXpConfig GameXp { get; set; } = new();
     public RatingConfig Rating { get; set; } = new();
     public WeeklyMissionsConfig WeeklyMissions { get; set; } = new();
     public ChatCommandsConfig ChatCommands { get; set; } = new();
-    public DatabaseConfig Database { get; set; } = new();
     public TrackingConfig Tracking { get; set; } = new();
     public BansConfig Bans { get; set; } = new();
     public PersistenceConfig Persistence { get; set; } = new();

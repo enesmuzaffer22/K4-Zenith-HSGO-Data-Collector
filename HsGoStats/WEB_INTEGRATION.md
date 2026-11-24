@@ -6,4 +6,6 @@ Next.js/backend yalnız server-side route, server action veya ayrı backend serv
 
 Yeni HSR görünümü için `hsgo_player_global_hsr` / `hsgo_player_season_hsr` bakiyesini `hsgo_rating_tiers` eşikleriyle çözün; tier adı ve HEX renk bu tabloda config ile senkron tutulur. Haftalık görev ekranı geçerli `hsgo_weekly_windows` satırını `hsgo_weekly_assignments` ve pencerenin `season_id` değeriyle aktif `hsgo_seasons` satırına bağlamalıdır. Görev açıklaması ve koşulları, atama anındaki değişmez `definition_json` kopyasından okunur; güncel config ile geriye dönük yeniden hesaplanmaz.
 
+Admin ayar ekranı `hsgo_plugin_settings` satırlarını bölüm bazında düzenler. Her yazma `revision=revision+1` yapmalı ve mevcut revision'ı WHERE koşulunda kullanmalıdır; ayrıntılı sözleşme `ADMIN_PANEL.md` içindedir. Son 24 saat benzersiz oyuncu, başlayan oturum ve ortalama süre `hsgo_player_sessions` üzerinden `sql/example_queries.sql` sorgusuyla alınır.
+
 Önerilen web hesabı yalnız `SELECT` yetkili ve IP allowlist'li olmalıdır. Oyun sunucusundan DB yazma erişimi ile `hsgo.tr` backend'inden dış erişim ayrı ayrı test edilmelidir. Prooyun dış bağlantıyı kapatıyorsa tarayıcıdan doğrudan DB bağlantısı kurmayın; sağlayıcıdan izinli read-only erişim veya kullanıcı onaylı API/senkronizasyon çözümü isteyin. Bu teslimat transfer hizmeti kurmaz.

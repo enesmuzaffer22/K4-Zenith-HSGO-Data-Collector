@@ -12,7 +12,7 @@ public sealed record StoredSeason(long Id, int Number, string Name, string Statu
 
 public sealed record SeasonRefreshResult(IReadOnlyList<StoredSeason> Seasons, IReadOnlyList<string> Warnings);
 
-public sealed class SeasonRepository(MySqlStore store, HsGoStatsConfig config, ScoringPolicy scoring)
+public sealed class SeasonRepository(MySqlStore store, HsGoStatsRuntimeSettings config, ScoringPolicy scoring)
 {
     private const string LockName = "hsgo_stats_manual_season_schedule";
 

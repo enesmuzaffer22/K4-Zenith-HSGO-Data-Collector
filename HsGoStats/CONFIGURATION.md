@@ -1,26 +1,39 @@
 # Configuration
 
-Config yolu: `addons/counterstrikesharp/configs/plugins/HsGoStats/HsGoStats.json`. Tüm alanları içeren güvenli örnek `examples/HsGoStats.json` dosyasındadır.
+## Yerel bootstrap JSON
+
+`addons/counterstrikesharp/configs/plugins/HsGoStats/HsGoStats.json` artık yalnız veritabanına bağlanmak için gereken alanları içerir:
 
 - `ConfigVersion`: yalnız `1` kabul edilir.
-- `Enabled`: istatistik event üretimini kapatır; schema/ban arşivini silmez.
-- `ServerId`: aynı DB'deki sunucu boyutu, 1–64 karakter.
-- `Season.Enabled`: elle tanımlanan sezon takvimini açar.
-- `Season.Schedule`: sezonların kronolojik listesidir. Her kayıt `Name`, `StartsAt` ve `EndsAt` alanlarını içerir. Tarihler `Z` veya açık UTC ofsetli ISO-8601 olmalı, bitiş başlangıçtan sonra gelmeli ve sezonlar çakışmamalıdır. Sezonlar arasında boşluk bırakılabilir. Bitiş sınırı dışlayıcıdır: `[StartsAt, EndsAt)`.
-- Otomatik sezon üretimi/yenilemesi yoktur. Yeni sezon için listeye yeni bir kayıt eklenip plugin veya sunucu yeniden başlatılır. Tamamlanmış kayıtlar geçmiş bütünlüğü için listede aynı sırada tutulmalıdır; tamamlanmış bir sezonun DB sınırları sonradan config ile değiştirilmez.
-- `Timezone`: IANA kimliği doğrulanır; kıyaslamalar UTC'dir.
-- `PreseasonTracking`: aktif sezon yokken yalnız genel istatistik toplar. Aktif sezonda false olsa da genel + sezon yazılır.
-- `Season.LeaderboardBlacklistSteamIds`: string biçiminde SteamID64 listesi. Bir oyuncu aktif sezon sırasında listeye eklenirse mevcut ve geçmiş sezonlardaki sırası/verisi korunur; dışlama bir sonraki sezon numarasından itibaren başlar. Bundan sonraki sezonlarda oyuncu, harita ve silah sezon satırları yazılmaz. Genel/all-time istatistikler daima tutulur. İlk sezon başlamadan eklenirse Season 1'den itibaren geçerlidir. Örnek: `["76561198000000001"]`. Geçersiz SteamID64 config'i reddeder, tekrarlar uyarı üretir. Değişiklikten sonra plugin/sunucu yeniden başlatılmalıdır.
-- `Scoring`: kill 10, HS ek 5, assist 4, death -3, plant 5, defuse 10, round win 3, suicide toplam -10. İntiharda death sayacı artar ama -3 ayrıca uygulanmaz. Negatif skor desteklenir.
-- `GameXp`: eski `Scoring/score` sayaçlarından bağımsız HSR olay ekonomisidir. Özel kill türleri üst üste eklenmez; geçerli değerlerin en yükseği seçilir. C4 drop/pickup bu sürümde uygulanmaz.
-- `Rating`: minimum HSR, demotion davranışı ve sıralı sekiz tier eşiği/adı/HEX rengidir. Tier kalıcı yazılmaz; bakiyeden hesaplanır. Tier tablosu web için MySQL'e senkronlanır.
-- `WeeklyMissions`: ödül hedefleri, dışlanan silahlar ve 100 görevlik tam katalogdur. Görevler yalnız aktif sezon varken atanır ve ilerler; sezon bittiği anda açık görevler de kapanır. Katalogdaki görev ID, kategori, olay, hedef ve ödül değiştirilebilir; değişiklik yalnız yeni atamalara uygulanır.
-- `WeeklyMissions.Rotation`: varsayılan `Europe/Istanbul`, Pazartesi `00:00`, kategori başına bir görevdir. Sezon haftanın ortasında başlarsa ilk pencere tam sezon başlangıcında, sezon haftanın ortasında biterse son pencere tam sezon bitişinde kesilir. Her pencere `season_id` ile saklanır; iki sezon aynı takvim haftasına denk gelse bile görevleri ayrıdır.
-- `ChatCommands`: ASCII `!sezon` / `!gorevler`, özel yanıt ve gerçek raund başlangıcı hatırlatmasıdır. Türkçe karakterli alias eklenmemelidir.
-- `Database`: MySqlConnector seçenekleri. `Username`/`Password=CHANGE_ME` hatadır. `SslMode=Preferred` varsayılandır; `None` uyarı üretir.
-- `Tracking`: sayaç/event bayrakları. `ShotsAndHits` maliyet ve event güvenilirliği nedeniyle varsayılan kapalıdır. Round katılımı round başında T/CT takımında bulunan oyuncularla sınırlıdır.
-- `Bans`: bu sürümde yalnız schema/manual SQL vardır. Auto import, native event ve enforcement true verilirse config reddedilir.
-- `Persistence`: bounded queue, batch, retry/backoff ve spool ayarları. Queue doluysa oyun thread'i beklemez; olay düşürülür ve loglanır.
-- `Logging.IncludePlayerNames`: false iken isim DB'ye gönderilmez. SteamID64 kimliktir.
+- `ServerId`: aynı veritabanındaki sunucuyu ayıran 1–64 karakterlik kimliktir.
+- `SettingsStore.SeedMissingRows`: true ise eksik ayar satırlarını güvenli ürün varsayılanlarıyla oluşturur.
+- `Database`: host, port, veritabanı, kullanıcı, parola, TLS ve bağlantı zaman aşımıdır.
 
-Aktif sezonun adı ve gelecekteki bitişi config ile güncellenebilir; aktif sezonun başlangıcı geriye dönük taşınmaz. Tamamlanmış sezonun adı ve sınırlarında farklılık varsa DB geçmişi korunur ve uyarı loglanır. Puan katsayısı değişikliği geçmiş skorları yeniden hesaplamaz; her event etkin politikanın `scoring_version` hash'ini taşır.
+Veritabanı bilgileri veritabanının içinden okunamayacağı için bu alanların yerel kalması zorunludur. Örnek dosya `examples/HsGoStats.json` içindedir. Parola hiçbir zaman `hsgo_plugin_settings` tablosuna yazılmaz.
+
+## Veritabanı ayarları
+
+Oyun davranışının doğruluk kaynağı `hsgo_plugin_settings` tablosudur. Her `server_id` için şu bölüm satırları bulunur:
+
+`enabled`, `season`, `scoring`, `game_xp`, `rating`, `weekly_missions`, `chat_commands`, `tracking`, `bans`, `persistence`, `logging`.
+
+`setting_json` ilgili bölümün JSON değeridir. Plugin ilk çalışmada eksik satırları oluşturur; var olan satırların üzerine yazmaz. Admin paneli güncellemede `revision=revision+1`, `updated_by` ve `updated_at` alanlarını birlikte değiştirmelidir. Güvenli optimistic-lock örneği `sql/example_queries.sql` içindedir.
+
+1.2.0'dan yükseltmede eski yerel JSON içindeki çalışma bölümleri yalnız eksik DB satırlarını ilk kez tohumlamak için okunur. Satırlar oluştuktan sonra DB daima yetkilidir; eski bölümler yerel dosyadan kaldırılabilir.
+
+Plugin revizyonları yaklaşık 30 saniyede bir denetler. Geçerli değişiklikler canlı uygulanır. Hatalı JSON veya doğrulamadan geçmeyen bir bölüm reddedilir ve son geçerli ayar çalışmaya devam eder. Queue kapasitesi, spool ve batch gibi `persistence` değişiklikleri ile kaldırılmış eski komut alias'ları plugin/server reload sonrasında tamamen uygulanır; yeni alias'lar canlı eklenir.
+
+## Bölüm kuralları
+
+- `season`: `Enabled`, `Timezone`, `PreseasonTracking`, `Schedule` ve leaderboard blacklist içerir. Her sezon `Name`, açık ofsetli `StartsAt` ve `EndsAt` taşır; liste kronolojik ve çakışmasız olmalıdır. Aralık `[StartsAt, EndsAt)` biçimindedir. Tamamlanmış sezonlar aynı sırada tutulmalıdır.
+- `scoring`: legacy score sayaçlarının kill, assist, death, C4 ve raund değerleridir. C4 drop/pickup uygulanmaz.
+- `game_xp`: HSR olay ekonomisidir. Özel kill ödülleri toplanmaz; en yüksek eşleşen değer seçilir.
+- `rating`: minimum HSR, demotion davranışı ve sıralı tier eşikleri/adları/HEX renkleridir.
+- `weekly_missions`: aktif sezonla sınırlı rotasyon, ödül hedefleri, dışlanan silahlar ve 100 görevlik katalogdur. İlk/son görev haftası sezon sınırında kırpılır.
+- `chat_commands`: `!sezon`, `!gorevler`, özel yanıt ve raund başı hatırlatmasıdır.
+- `tracking`: istatistik olayları, warmup/bot/team-kill filtreleri ve map/weapon boyutlarıdır.
+- `bans`: yalnız arşiv yetenekleridir; import ve enforcement desteklenmez.
+- `persistence`: bounded queue, batch, retry/backoff ve dayanıklı spool ayarlarıdır.
+- `logging`: log seviyesi ile oyuncu adının saklanıp saklanmayacağını belirler.
+
+Puan katsayısı değişikliği geçmiş skorları yeniden hesaplamaz. Haftalık görev tanımı atama anında dondurulur. Aktif sezonun başlangıcı geriye dönük taşınmaz; tamamlanmış sezonun DB geçmişi korunur.

@@ -9,19 +9,66 @@ public sealed record ConfigValidationResult(IReadOnlyList<string> Errors, IReadO
 
 public static class ConfigValidator
 {
-    public static ConfigValidationResult Validate(HsGoStatsConfig config)
+    public static ConfigValidationResult Validate(HsGoStatsConfig bootstrap, HsGoStatsRuntimeSettings? config = null)
     {
-        var errors = new List<string>();
-        var warnings = new List<string>();
+        config ??= new HsGoStatsRuntimeSettings();
+        var bootstrapValidation = ValidateBootstrap(bootstrap);
+        var errors = bootstrapValidation.Errors.ToList();
+        var warnings = bootstrapValidation.Warnings.ToList();
+        var rawSeason = config.Season;
+        var rawScoring = config.Scoring;
+        var rawGameXp = config.GameXp;
+        var rawRating = config.Rating;
+        var rawWeekly = config.WeeklyMissions;
+        var rawChat = config.ChatCommands;
+        var rawTracking = config.Tracking;
+        var rawBans = config.Bans;
+        var rawPersistence = config.Persistence;
+        var rawLogging = config.Logging;
+        if (rawSeason is null) errors.Add("season cannot be null.");
+        if (rawScoring is null) errors.Add("scoring cannot be null.");
+        if (rawGameXp is null) errors.Add("game_xp cannot be null.");
+        if (rawRating is null) errors.Add("rating cannot be null.");
+        if (rawWeekly is null) errors.Add("weekly_missions cannot be null.");
+        if (rawChat is null) errors.Add("chat_commands cannot be null.");
+        if (rawTracking is null) errors.Add("tracking cannot be null.");
+        if (rawBans is null) errors.Add("bans cannot be null.");
+        if (rawPersistence is null) errors.Add("persistence cannot be null.");
+        if (rawLogging is null) errors.Add("logging cannot be null.");
+        if (errors.Count > bootstrapValidation.Errors.Count) return new(errors, warnings);
+        if (rawSeason!.Schedule is null) errors.Add("Season.Schedule cannot be null.");
+        if (rawSeason.LeaderboardBlacklistSteamIds is null) errors.Add("Season.LeaderboardBlacklistSteamIds cannot be null.");
+        if (rawRating!.Tiers is null) errors.Add("Rating.Tiers cannot be null.");
+        if (rawWeekly!.Rotation is null) errors.Add("WeeklyMissions.Rotation cannot be null.");
+        if (rawWeekly.Rewards is null) errors.Add("WeeklyMissions.Rewards cannot be null.");
+        if (rawWeekly.Catalog is null) errors.Add("WeeklyMissions.Catalog cannot be null.");
+        if (rawWeekly.ExcludedMissionWeapons is null) errors.Add("WeeklyMissions.ExcludedMissionWeapons cannot be null.");
+        if (rawChat!.Season is null || rawChat.Season.Aliases is null) errors.Add("ChatCommands.Season and its aliases cannot be null.");
+        if (rawChat.Missions is null || rawChat.Missions.Aliases is null) errors.Add("ChatCommands.Missions and its aliases cannot be null.");
+        if (rawChat.RoundStartReminder is null) errors.Add("ChatCommands.RoundStartReminder cannot be null.");
+        if (errors.Count > bootstrapValidation.Errors.Count) return new(errors, warnings);
 
-        if (config.Version != 1) errors.Add("ConfigVersion must be 1.");
-        if (string.IsNullOrWhiteSpace(config.ServerId) || config.ServerId.Length > 64)
-            errors.Add("ServerId must contain 1-64 characters.");
-        try { _ = TimeZoneInfo.FindSystemTimeZoneById(config.Season.Timezone); }
-        catch { errors.Add($"Season.Timezone '{config.Season.Timezone}' is not available on this host."); }
-        var seasonSchedule = config.Season.Schedule ?? [];
-        if (config.Season.Schedule is null) errors.Add("Season.Schedule cannot be null.");
-        if (config.Season.Enabled && seasonSchedule.Count == 0) warnings.Add("Season.Schedule is empty; no season or weekly mission window can become active.");
+        var seasonConfig = rawSeason!;
+        var scoring = rawScoring!;
+        var gameXp = rawGameXp!;
+        var rating = rawRating!;
+        var weekly = rawWeekly!;
+        var chat = rawChat!;
+        var tracking = rawTracking!;
+        var bans = rawBans!;
+        var persistence = rawPersistence!;
+        var seasonSchedule = seasonConfig.Schedule!;
+        var seasonBlacklist = seasonConfig.LeaderboardBlacklistSteamIds!;
+        var tiers = rating.Tiers!;
+        var rotation = weekly.Rotation!;
+        var catalog = weekly.Catalog!;
+        var excludedWeapons = weekly.ExcludedMissionWeapons!;
+        var seasonAliases = chat.Season!.Aliases!;
+        var missionAliases = chat.Missions!.Aliases!;
+
+        try { _ = TimeZoneInfo.FindSystemTimeZoneById(seasonConfig.Timezone); }
+        catch { errors.Add($"Season.Timezone '{seasonConfig.Timezone}' is not available on this host."); }
+        if (seasonConfig.Enabled && seasonSchedule.Count == 0) warnings.Add("Season.Schedule is empty; no season or weekly mission window can become active.");
         var seasonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         DateTimeOffset? previousEnd = null;
         foreach (var (season, index) in seasonSchedule.Select((value, index) => (value, index)))
@@ -39,7 +86,7 @@ public static class ConfigValidator
             }
         }
         var blacklistSteamIds = new HashSet<ulong>();
-        foreach (var value in config.Season.LeaderboardBlacklistSteamIds)
+        foreach (var value in seasonBlacklist)
         {
             if (!ulong.TryParse(value, out var steamId) || steamId == 0)
                 errors.Add($"Season.LeaderboardBlacklistSteamIds contains an invalid SteamID64: '{value}'.");
@@ -47,36 +94,27 @@ public static class ConfigValidator
                 warnings.Add($"Season.LeaderboardBlacklistSteamIds contains duplicate SteamID64 '{value}'.");
         }
 
-        if (string.IsNullOrWhiteSpace(config.Database.Host)) errors.Add("Database.Host is required.");
-        if (string.IsNullOrWhiteSpace(config.Database.Name)) errors.Add("Database.Name is required.");
-        if (config.Database.Username is "" or "CHANGE_ME") errors.Add("Database.Username must be configured.");
-        if (config.Database.Password is "" or "CHANGE_ME") errors.Add("Database.Password must be configured.");
-        if (!Enum.TryParse<MySqlSslMode>(config.Database.SslMode, true, out _))
-            errors.Add("Database.SslMode is not supported by MySqlConnector.");
-        if (config.Database.ConnectionTimeoutSeconds is < 1 or > 120)
-            errors.Add("Database.ConnectionTimeoutSeconds must be between 1 and 120.");
-
-        if (config.Persistence.BatchIntervalSeconds is < 1 or > 300) errors.Add("Persistence.BatchIntervalSeconds must be between 1 and 300.");
-        if (config.Persistence.MaxBatchSize is < 1 or > 5000) errors.Add("Persistence.MaxBatchSize must be between 1 and 5000.");
-        if (config.Persistence.MaxQueuedEvents is < 100 or > 1_000_000) errors.Add("Persistence.MaxQueuedEvents must be between 100 and 1000000.");
-        if (config.Persistence.RetryMaxAttempts is < 1 or > 20) errors.Add("Persistence.RetryMaxAttempts must be between 1 and 20.");
-        if (config.Scoring.BombDropPenaltyMaxPerRound is < 0 or > 10) errors.Add("Scoring.BombDropPenaltyMaxPerRound must be between 0 and 10.");
-        var positiveGameXp = new[] { config.GameXp.NormalKill, config.GameXp.HeadshotKill, config.GameXp.Assist, config.GameXp.KnifeKill,
-            config.GameXp.NoScopeKill, config.GameXp.WallbangKill, config.GameXp.ThroughSmokeKill, config.GameXp.AirborneKill,
-            config.GameXp.BlindKill, config.GameXp.ZeusKill, config.GameXp.HeKill, config.GameXp.MolotovKill,
-            config.GameXp.BombPlant, config.GameXp.BombDefuse, config.GameXp.BombExplode };
+        if (persistence.BatchIntervalSeconds is < 1 or > 300) errors.Add("Persistence.BatchIntervalSeconds must be between 1 and 300.");
+        if (persistence.MaxBatchSize is < 1 or > 5000) errors.Add("Persistence.MaxBatchSize must be between 1 and 5000.");
+        if (persistence.MaxQueuedEvents is < 100 or > 1_000_000) errors.Add("Persistence.MaxQueuedEvents must be between 100 and 1000000.");
+        if (persistence.RetryMaxAttempts is < 1 or > 20) errors.Add("Persistence.RetryMaxAttempts must be between 1 and 20.");
+        if (scoring.BombDropPenaltyMaxPerRound is < 0 or > 10) errors.Add("Scoring.BombDropPenaltyMaxPerRound must be between 0 and 10.");
+        var positiveGameXp = new[] { gameXp.NormalKill, gameXp.HeadshotKill, gameXp.Assist, gameXp.KnifeKill,
+            gameXp.NoScopeKill, gameXp.WallbangKill, gameXp.ThroughSmokeKill, gameXp.AirborneKill,
+            gameXp.BlindKill, gameXp.ZeusKill, gameXp.HeKill, gameXp.MolotovKill,
+            gameXp.BombPlant, gameXp.BombDefuse, gameXp.BombExplode };
         if (positiveGameXp.Any(x => x < 0)) errors.Add("GameXp reward values cannot be negative.");
-        if (config.GameXp.Death > 0 || config.GameXp.Suicide > 0) errors.Add("GameXp death and suicide values cannot be positive.");
+        if (gameXp.Death > 0 || gameXp.Suicide > 0) errors.Add("GameXp death and suicide values cannot be positive.");
 
-        if (config.Rating.MinimumXP < 0) errors.Add("Rating.MinimumXP cannot be negative.");
-        if (config.Rating.Tiers.Count == 0) errors.Add("Rating.Tiers must contain at least one tier.");
+        if (rating.MinimumXP < 0) errors.Add("Rating.MinimumXP cannot be negative.");
+        if (tiers.Count == 0) errors.Add("Rating.Tiers must contain at least one tier.");
         else
         {
-            var ordered = config.Rating.Tiers.OrderBy(x => x.MinXP).ToArray();
-            if (ordered[0].MinXP != config.Rating.MinimumXP) errors.Add("The first rating tier must start at Rating.MinimumXP.");
+            var ordered = tiers.OrderBy(x => x.MinXP).ToArray();
+            if (ordered[0].MinXP != rating.MinimumXP) errors.Add("The first rating tier must start at Rating.MinimumXP.");
             if (ordered.Select(x => x.Id).Distinct().Count() != ordered.Length) errors.Add("Rating tier IDs must be unique.");
             if (ordered.Select(x => x.MinXP).Distinct().Count() != ordered.Length) errors.Add("Rating tier thresholds must be unique.");
-            if (!ordered.SequenceEqual(config.Rating.Tiers)) errors.Add("Rating tiers must be sorted by MinXP.");
+            if (!ordered.SequenceEqual(tiers)) errors.Add("Rating tiers must be sorted by MinXP.");
             foreach (var tier in ordered)
             {
                 if (string.IsNullOrWhiteSpace(tier.Name)) errors.Add($"Rating tier {tier.Id} requires a name.");
@@ -84,11 +122,10 @@ public static class ConfigValidator
             }
         }
 
-        try { _ = TimeZoneInfo.FindSystemTimeZoneById(config.WeeklyMissions.Rotation.Timezone); }
-        catch { errors.Add($"WeeklyMissions.Rotation.Timezone '{config.WeeklyMissions.Rotation.Timezone}' is not available on this host."); }
-        if (!TimeOnly.TryParseExact(config.WeeklyMissions.Rotation.Time, "HH:mm", out _)) errors.Add("WeeklyMissions.Rotation.Time must use HH:mm.");
-        if (config.WeeklyMissions.Rotation.TasksPerCategory != 1) errors.Add("WeeklyMissions.Rotation.TasksPerCategory must be 1 for the nine-category product contract.");
-        var catalog = config.WeeklyMissions.Catalog;
+        try { _ = TimeZoneInfo.FindSystemTimeZoneById(rotation.Timezone); }
+        catch { errors.Add($"WeeklyMissions.Rotation.Timezone '{rotation.Timezone}' is not available on this host."); }
+        if (!TimeOnly.TryParseExact(rotation.Time, "HH:mm", out _)) errors.Add("WeeklyMissions.Rotation.Time must use HH:mm.");
+        if (rotation.TasksPerCategory != 1) errors.Add("WeeklyMissions.Rotation.TasksPerCategory must be 1 for the nine-category product contract.");
         var allowedMissionEvents = new HashSet<string>(
             ["Kill", "Assist", "RoundKills", "RoundHeadshotKills", "RoundWeaponKills", "RoundKillThreshold",
              "GrenadeUsed", "FlashEnemyBlinded", "Damage", "RoundFlashBlinds", "BombPlant", "OwnBombExplode",
@@ -108,23 +145,47 @@ public static class ConfigValidator
         }
         foreach (var category in Enumerable.Range(1, 9))
             if (!catalog.Any(x => x.Category == category)) errors.Add($"Weekly mission category {category} has no valid mission.");
-        var excluded = config.WeeklyMissions.ExcludedMissionWeapons.Select(NormalizeWeapon).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var excluded = excludedWeapons.Select(NormalizeWeapon).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var mission in catalog.Where(x => x.Weapons.Any(w => excluded.Contains(NormalizeWeapon(w)))))
             errors.Add($"Weekly mission {mission.Id} uses an excluded weapon.");
         if (catalog.Sum(x => x.RewardXp) != 17_145) warnings.Add($"Weekly mission reward total is {catalog.Sum(x => x.RewardXp)}, not the product baseline 17145.");
 
-        ValidateAliases(config.ChatCommands.Season.Aliases, "ChatCommands.Season", errors);
-        ValidateAliases(config.ChatCommands.Missions.Aliases, "ChatCommands.Missions", errors);
+        ValidateAliases(seasonAliases, "ChatCommands.Season", errors);
+        ValidateAliases(missionAliases, "ChatCommands.Missions", errors);
 
-        if (config.Bans.AutoImportFromExistingAdminPlugin) errors.Add("Bans.AutoImportFromExistingAdminPlugin is not supported in 1.0.0.");
-        if (config.Bans.TrackNativeBanEventsIfVerified) errors.Add("Bans.TrackNativeBanEventsIfVerified is not supported in 1.0.0.");
-        if (config.Bans.ExposeBanEnforcement) errors.Add("Bans.ExposeBanEnforcement is not supported; this collector never enforces bans.");
-        if (!config.Tracking.ExcludeSuicidesFromKills) warnings.Add("Tracking.ExcludeSuicidesFromKills=false is ignored: suicides are never credited as kills.");
-        if (config.Scoring.FriendlyFirePenalty != 0) warnings.Add("Scoring.FriendlyFirePenalty is not applied in 1.0.0; team kills never earn kill points.");
-        if (config.Scoring.BombDrop != 0 || config.Scoring.BombPickup != 0) warnings.Add("Manual C4 drop/pickup scoring is disabled because the available game events cannot reliably distinguish manual and automatic drops.");
-        if (!config.Persistence.PersistPendingEventsToDisk) warnings.Add("Pending events can be lost on process crash because the durable spool is disabled.");
-        if (config.Database.SslMode.Equals("None", StringComparison.OrdinalIgnoreCase)) warnings.Add("Database TLS is disabled. Confirm that the provider network is private and trusted.");
+        if (bans.AutoImportFromExistingAdminPlugin) errors.Add("Bans.AutoImportFromExistingAdminPlugin is not supported in 1.0.0.");
+        if (bans.TrackNativeBanEventsIfVerified) errors.Add("Bans.TrackNativeBanEventsIfVerified is not supported in 1.0.0.");
+        if (bans.ExposeBanEnforcement) errors.Add("Bans.ExposeBanEnforcement is not supported; this collector never enforces bans.");
+        if (!tracking.ExcludeSuicidesFromKills) warnings.Add("Tracking.ExcludeSuicidesFromKills=false is ignored: suicides are never credited as kills.");
+        if (scoring.FriendlyFirePenalty != 0) warnings.Add("Scoring.FriendlyFirePenalty is not applied in 1.0.0; team kills never earn kill points.");
+        if (scoring.BombDrop != 0 || scoring.BombPickup != 0) warnings.Add("Manual C4 drop/pickup scoring is disabled because the available game events cannot reliably distinguish manual and automatic drops.");
+        if (!persistence.PersistPendingEventsToDisk) warnings.Add("Pending events can be lost on process crash because the durable spool is disabled.");
+        if (bootstrap.Database.SslMode.Equals("None", StringComparison.OrdinalIgnoreCase)) warnings.Add("Database TLS is disabled. Confirm that the provider network is private and trusted.");
 
+        return new(errors, warnings);
+    }
+
+    public static ConfigValidationResult ValidateBootstrap(HsGoStatsConfig config)
+    {
+        var errors = new List<string>();
+        var warnings = new List<string>();
+        if (config.Version != 1) errors.Add("ConfigVersion must be 1.");
+        if (string.IsNullOrWhiteSpace(config.ServerId) || config.ServerId.Length > 64)
+            errors.Add("ServerId must contain 1-64 characters.");
+        if (config.SettingsStore is null) errors.Add("SettingsStore is required.");
+        if (config.Database is null)
+        {
+            errors.Add("Database is required.");
+            return new(errors, warnings);
+        }
+        if (string.IsNullOrWhiteSpace(config.Database.Host)) errors.Add("Database.Host is required.");
+        if (string.IsNullOrWhiteSpace(config.Database.Name)) errors.Add("Database.Name is required.");
+        if (config.Database.Username is "" or "CHANGE_ME") errors.Add("Database.Username must be configured.");
+        if (config.Database.Password is "" or "CHANGE_ME") errors.Add("Database.Password must be configured.");
+        if (!Enum.TryParse<MySqlSslMode>(config.Database.SslMode, true, out _))
+            errors.Add("Database.SslMode is not supported by MySqlConnector.");
+        if (config.Database.ConnectionTimeoutSeconds is < 1 or > 120)
+            errors.Add("Database.ConnectionTimeoutSeconds must be between 1 and 120.");
         return new(errors, warnings);
     }
 

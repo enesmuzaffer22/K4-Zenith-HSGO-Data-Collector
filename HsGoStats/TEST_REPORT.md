@@ -1,5 +1,25 @@
 # Test report
 
+## 2026-11-24 — DB ayarları ve oturum telemetrisi sürümü 1.3.0
+
+| Check | Result |
+|---|---|
+| Release build | PASS — 0 warning, 0 error |
+| Unit tests | PASS — 40/40 |
+| Yerel config'in yalnız bootstrap alanları taşıması | PASS |
+| Eski 1.2 JSON bölümlerinin ilk DB seed'e aktarılması | PASS |
+| Runtime ayar doğrulaması | PASS |
+| `hsgo_plugin_settings` schema v5 | PASS |
+| `hsgo_player_sessions` schema ve indeksleri | PASS |
+| Session open/heartbeat/close dayanıklı JSON round-trip | PASS |
+| Son 24 saat unique/session/ortalama sorgusu | PASS — statik sorgu denetimi |
+| Örnek ve yayın bootstrap JSON parse | PASS |
+| C4 drop/pick event handler veya XP | PASS — kapsam dışında, eklenmedi |
+| Release archive | `HsGoStats-v1.3.0.zip`, 577236 bytes, SHA-256 `46476EB6A2E1A40E4DA9BC4FA8AF57E6A2FC46D59500EC4C1B5BCD8CDBAA71A4` |
+| Gerçek MySQL admin update ve CS2 disconnect/crash | NOT TESTED — staging sunucusu/veritabanı gerekli |
+
+DB-backed ayarların gerçek MySQL transaction davranışı ile aktif oyuncu oturum süreleri staging ortamı olmadan doğrulanamaz. Derleme, birim testleri, DDL ve sorgu denetimleri geçmiştir; canlı başarı iddiası yapılmaz.
+
 ## 2026-11-24 — Manuel sezon takvimi sürümü 1.2.0
 
 | Check | Result |

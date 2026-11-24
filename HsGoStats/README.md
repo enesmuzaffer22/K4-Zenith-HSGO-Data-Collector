@@ -1,4 +1,4 @@
-# HSGo Stats Collector 1.2.0
+# HSGo Stats Collector 1.3.0
 
 Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, HSR ve haftalık görev eklentisidir. Zenith, menü, admin, rank veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. HUD, clan tag, skor tablosu, skin, ConVar veya ban enforcement eklemez.
 
@@ -10,11 +10,11 @@ Bu sürüm 24 Kasım 2026 tarihinde CounterStrikeSharp API `1.0.379` ve `.NET 10
 
 1. `publish/HsGoStats` içeriğini `csgo/addons/counterstrikesharp/plugins/HsGoStats/` altına kopyalayın.
 2. `examples/HsGoStats.json` dosyasını `csgo/addons/counterstrikesharp/configs/plugins/HsGoStats/HsGoStats.json` olarak kopyalayın.
-3. Prooyun panelindeki gerçek MySQL host, port, veritabanı, kullanıcı ve parolayı yazın. `CHANGE_ME` ile plugin güvenli biçimde devre dışı kalır.
-4. Sunucuyu yeniden başlatın. Konsolda `HSGo Stats is ready` mesajını ve aktif sezonu kontrol edin.
-5. DB kullanıcısında DDL yetkisi yoksa bir yönetici `sql/schema.sql` dosyasını bir kez çalıştırmalıdır.
+3. Yerel JSON'a Prooyun panelindeki gerçek MySQL host, port, veritabanı, kullanıcı ve parolayı yazın. `CHANGE_ME` ile plugin güvenli biçimde devre dışı kalır.
+4. Sunucuyu yeniden başlatın. Plugin eksik `hsgo_plugin_settings` satırlarını oluşturur; bundan sonra oyun ayarlarını admin web paneli bu tablodan yönetir.
+5. Konsolda `HSGo Stats is ready` mesajını ve aktif sezonu kontrol edin. DB kullanıcısında DDL yetkisi yoksa bir yönetici önce `sql/schema.sql` dosyasını çalıştırmalıdır.
 
-Doğal CounterStrikeSharp config yolu kullanılır. Parola loglanmaz. `data/pending-events.jsonl` plugin klasöründe otomatik oluşan crash-recovery spool dosyasıdır.
+Doğal CounterStrikeSharp config yolu yalnız DB bootstrap bilgileri için kullanılır. Parola loglanmaz veya DB ayar tablosuna kopyalanmaz. İstatistik, görev ve oturum olayları için ayrı crash-recovery spool dosyaları `data/` altında oluşur.
 
 ## VS Code / .NET CLI ile derleme
 
@@ -34,7 +34,9 @@ Release çıktısı `src/bin/Release/net10.0` altındadır. Paket yeniden üretm
 - Genel ve sezonluk satırlar aynı idempotent transaction içinde ayrı artırılır.
 - Oyun aksiyonlarından bağımsız genel/sezon HSR bakiyeleri, sekiz config kontrollü tier ve renk.
 - Elle adlandırılan, kesin başlangıç/bitiş saatli sezon takvimi; otomatik sezon üretimi yoktur.
+- Sezon, görev, HSR, tracking ve diğer çalışma ayarları admin paneline uygun `hsgo_plugin_settings` tablosundan okunur; geçersiz revizyon son geçerli ayarı bozmaz.
 - Europe/Istanbul Pazartesi rotasyonlu, yalnız aktif sezon içinde yaşayan oyuncuya özel dokuz haftalık görev; ilk ve son görev haftası sezon sınırında kırpılır.
+- `hsgo_player_sessions` üzerinden son 24 saat benzersiz oyuncu, başlayan oturum ve ortalama oturum süresi raporu.
 - `!sezon` ve ASCII `!gorevler` komutları ile config kontrollü raund başı hatırlatma.
 - `Season.LeaderboardBlacklistSteamIds` oyuncuları genel istatistiklerde tutar; aktif/geçmiş sezonu değiştirmeden bir sonraki sezondan itibaren sezonluk hedeflerden çıkarır.
 - Sezon aralarında sezonluk istatistik, HSR ve haftalık görev ilerlemesi yoktur; `PreseasonTracking` açıksa genel istatistik devam eder.
@@ -43,4 +45,4 @@ Release çıktısı `src/bin/Release/net10.0` altındadır. Paket yeniden üretm
 - Ban tablosu yalnız arşivdir; SQL kaydı oyuncuyu banlamaz.
 - C4 drop/pick puanı kullanıcı kararıyla kapsam dışıdır; plant/explode/defuse XP ve görevleri aktiftir.
 
-Ayrıntılar için `CONFIGURATION.md`, `DATABASE.md`, `LIMITATIONS.md` ve `TEST_REPORT.md` dosyalarına bakın.
+Ayrıntılar için `CONFIGURATION.md`, `ADMIN_PANEL.md`, `DATABASE.md`, `LIMITATIONS.md` ve `TEST_REPORT.md` dosyalarına bakın.

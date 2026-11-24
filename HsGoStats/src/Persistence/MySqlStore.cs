@@ -6,12 +6,13 @@ namespace HsGoStats.Persistence;
 
 public sealed class MySqlStore
 {
-    private readonly HsGoStatsConfig _config;
+    private readonly HsGoStatsConfig _bootstrap;
+    private HsGoStatsRuntimeSettings _settings = new();
     private readonly string _connectionString;
 
     public MySqlStore(HsGoStatsConfig config)
     {
-        _config = config;
+        _bootstrap = config;
         var sslMode = Enum.Parse<MySqlSslMode>(config.Database.SslMode, true);
         _connectionString = new MySqlConnectionStringBuilder
         {
@@ -29,6 +30,8 @@ public sealed class MySqlStore
             AllowUserVariables = false
         }.ConnectionString;
     }
+
+    public void ApplyRuntimeSettings(HsGoStatsRuntimeSettings settings) => _settings = settings;
 
     public async Task<IReadOnlyList<string>> InitializeSchemaAsync(CancellationToken cancellationToken)
     {
@@ -52,7 +55,7 @@ public sealed class MySqlStore
         await using var transaction = await connection.BeginTransactionAsync(token);
         await using (var disable = new MySqlCommand("UPDATE hsgo_rating_tiers SET enabled=0,updated_at=UTC_TIMESTAMP(6) WHERE server_id=@server", connection, transaction))
         {
-            disable.Parameters.AddWithValue("@server", _config.ServerId);
+            disable.Parameters.AddWithValue("@server", _bootstrap.ServerId);
             await disable.ExecuteNonQueryAsync(token);
         }
         const string sql = """
@@ -60,10 +63,10 @@ public sealed class MySqlStore
             VALUES(@server,@id,@name,@min,@color,1,UTC_TIMESTAMP(6))
             ON DUPLICATE KEY UPDATE name=VALUES(name),min_xp=VALUES(min_xp),color=VALUES(color),enabled=1,updated_at=VALUES(updated_at)
             """;
-        foreach (var tier in _config.Rating.Enabled ? _config.Rating.Tiers : [])
+        foreach (var tier in _settings.Rating.Enabled ? _settings.Rating.Tiers : [])
         {
             await using var command = new MySqlCommand(sql, connection, transaction);
-            command.Parameters.AddWithValue("@server", _config.ServerId);
+            command.Parameters.AddWithValue("@server", _bootstrap.ServerId);
             command.Parameters.AddWithValue("@id", tier.Id);
             command.Parameters.AddWithValue("@name", tier.Name);
             command.Parameters.AddWithValue("@min", tier.MinXP);
@@ -139,7 +142,7 @@ public sealed class MySqlStore
             """;
         await using (var selectOpen = new MySqlCommand(openSql, connection, transaction))
         {
-            selectOpen.Parameters.AddWithValue("@server_id", _config.ServerId);
+            selectOpen.Parameters.AddWithValue("@server_id", _bootstrap.ServerId);
             await using var reader = await selectOpen.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken)) openRules[reader.GetUInt64(0)] = reader.GetInt32(1);
         }
@@ -153,7 +156,7 @@ public sealed class MySqlStore
         foreach (var steamId in configured.Where(steamId => !openRules.ContainsKey(steamId)))
         {
             await using var insert = new MySqlCommand(insertSql, connection, transaction);
-            insert.Parameters.AddWithValue("@server_id", _config.ServerId);
+            insert.Parameters.AddWithValue("@server_id", _bootstrap.ServerId);
             insert.Parameters.AddWithValue("@steam_id64", steamId);
             insert.Parameters.AddWithValue("@effective_from", effectiveFromSeasonNumber);
             await insert.ExecuteNonQueryAsync(cancellationToken);
@@ -167,7 +170,7 @@ public sealed class MySqlStore
         foreach (var steamId in openRules.Keys.Where(steamId => !configured.Contains(steamId)))
         {
             await using var close = new MySqlCommand(closeSql, connection, transaction);
-            close.Parameters.AddWithValue("@server_id", _config.ServerId);
+            close.Parameters.AddWithValue("@server_id", _bootstrap.ServerId);
             close.Parameters.AddWithValue("@steam_id64", steamId);
             close.Parameters.AddWithValue("@effective_until", effectiveFromSeasonNumber);
             await close.ExecuteNonQueryAsync(cancellationToken);
@@ -182,7 +185,7 @@ public sealed class MySqlStore
             """;
         await using (var selectRules = new MySqlCommand(rulesSql, connection, transaction))
         {
-            selectRules.Parameters.AddWithValue("@server_id", _config.ServerId);
+            selectRules.Parameters.AddWithValue("@server_id", _bootstrap.ServerId);
             await using var reader = await selectRules.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
@@ -212,14 +215,14 @@ public sealed class MySqlStore
             if (item.ApplyGlobal)
             {
                 await UpsertStatsAsync(connection, transaction, "hsgo_player_global_stats", false, item, cancellationToken);
-                if (_config.Tracking.PerMap && item.MapName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_map_stats", "map_name", "global", 0, item.MapName, item, cancellationToken);
-                if (_config.Tracking.PerWeapon && item.WeaponName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_weapon_stats", "weapon_name", "global", 0, item.WeaponName, item, cancellationToken);
+                if (_settings.Tracking.PerMap && item.MapName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_map_stats", "map_name", "global", 0, item.MapName, item, cancellationToken);
+                if (_settings.Tracking.PerWeapon && item.WeaponName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_weapon_stats", "weapon_name", "global", 0, item.WeaponName, item, cancellationToken);
             }
             if (item.ApplySeason && item.SeasonId is long seasonId)
             {
                 await UpsertStatsAsync(connection, transaction, "hsgo_player_season_stats", true, item, cancellationToken);
-                if (_config.Tracking.PerMap && item.MapName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_map_stats", "map_name", "season", seasonId, item.MapName, item, cancellationToken);
-                if (_config.Tracking.PerWeapon && item.WeaponName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_weapon_stats", "weapon_name", "season", seasonId, item.WeaponName, item, cancellationToken);
+                if (_settings.Tracking.PerMap && item.MapName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_map_stats", "map_name", "season", seasonId, item.MapName, item, cancellationToken);
+                if (_settings.Tracking.PerWeapon && item.WeaponName is not null) await UpsertDimensionAsync(connection, transaction, "hsgo_weapon_stats", "weapon_name", "season", seasonId, item.WeaponName, item, cancellationToken);
             }
             applied++;
         }

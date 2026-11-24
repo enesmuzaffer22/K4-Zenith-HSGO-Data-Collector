@@ -16,11 +16,12 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 {
     public override string ModuleName => "HSGo Stats Collector";
     public override string ModuleAuthor => "HSGo / K4-Zenith contributors";
-    public override string ModuleVersion => "1.2.0";
+    public override string ModuleVersion => "1.3.0";
     public override string ModuleDescription => "Standalone HSR, weekly mission, season and MySQL statistics collector.";
 
     public HsGoStatsConfig Config { get; set; } = new();
 
+    private HsGoStatsRuntimeSettings _settings = new();
     private ConfigValidationResult _validation = new([], []);
     private readonly SeasonState _seasonState = new();
     private readonly SeasonLeaderboardBlacklistState _seasonLeaderboardBlacklistState = new();
@@ -29,27 +30,29 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     private HashSet<ulong> _configuredSeasonLeaderboardBlacklist = [];
     private CancellationTokenSource? _lifetime;
     private MySqlStore? _store;
+    private PluginSettingsRepository? _settingsRepository;
     private SeasonRepository? _seasonRepository;
     private EventPipeline? _pipeline;
     private ScoringPolicy? _scoring;
     private HsrScoringPolicy? _hsrScoring;
     private WeeklyMissionRepository? _missionRepository;
     private WeeklyMissionPipeline? _missionPipeline;
+    private PlayerSessionRepository? _sessionRepository;
+    private PlayerSessionPipeline? _sessionPipeline;
     private readonly Dictionary<ulong, string> _lastGrenadeThrown = [];
     private PlayerIdentity? _bombPlanter;
     private string? _currentMap;
     private volatile bool _ready;
     private int _refreshing;
+    private long _settingsRevision;
+    private long _rejectedSettingsRevision;
+    private readonly HashSet<string> _registeredSeasonCommands = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _registeredMissionCommands = new(StringComparer.OrdinalIgnoreCase);
 
     public void OnConfigParsed(HsGoStatsConfig config)
     {
         Config = config;
-        _validation = ConfigValidator.Validate(config);
-        var blacklist = config.Season.LeaderboardBlacklistSteamIds
-            .Select(value => ulong.TryParse(value, out var steamId) ? steamId : 0)
-            .Where(steamId => steamId != 0)
-            .ToHashSet();
-        Volatile.Write(ref _configuredSeasonLeaderboardBlacklist, blacklist);
+        _validation = ConfigValidator.ValidateBootstrap(config);
     }
 
     public override void Load(bool hotReload)
@@ -58,7 +61,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         if (!_validation.IsValid)
         {
             foreach (var error in _validation.Errors) Logger.LogError("HSGo config: {Error}", error);
-            Logger.LogError("HSGo statistics collection is disabled until the JSON configuration is corrected and the server/plugin is restarted.");
+            Logger.LogError("HSGo statistics collection is disabled until the bootstrap JSON configuration is corrected and the server/plugin is restarted.");
             return;
         }
 
@@ -81,21 +84,9 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterListener<Listeners.OnMapEnd>(OnMapEnd);
 
-        _scoring = new ScoringPolicy(Config.Scoring);
-        _hsrScoring = new HsrScoringPolicy(Config.GameXp);
         _lifetime = new CancellationTokenSource();
         _store = new MySqlStore(Config);
-        _seasonRepository = new SeasonRepository(_store, Config, _scoring);
-        var spoolPath = Path.Combine(ModuleDirectory, "data", "pending-events.jsonl");
-        _pipeline = new EventPipeline(_store, new DurableSpool(spoolPath, Config.Persistence.PersistPendingEventsToDisk, message => Logger.LogWarning("{Message}", message)), Config.Persistence,
-            message => Logger.LogInformation("{Message}", message),
-            (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
-        _missionRepository = new WeeklyMissionRepository(_store, Config);
-        _missionPipeline = new WeeklyMissionPipeline(_missionRepository, Config.Persistence,
-            Path.Combine(ModuleDirectory, "data", "pending-missions.jsonl"),
-            (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
-
-        RegisterConfiguredCommands();
+        _settingsRepository = new PluginSettingsRepository(_store, Config);
 
         AddTimer(10.0f, TickPlaytime, TimerFlags.REPEAT);
         AddTimer(30.0f, RequestSeasonRefresh, TimerFlags.REPEAT);
@@ -110,9 +101,13 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     public override void Unload(bool hotReload)
     {
         TickPlaytime();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var session in _playSessions.Values)
+            if (session.DatabaseOpened) EnqueueSession(session, PlayerSessionSignalType.Close, now);
         _ready = false;
         _pipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
         _missionPipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+        _sessionPipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
         _lifetime?.Cancel();
         _lifetime?.Dispose();
         _playSessions.Clear();
@@ -126,6 +121,40 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         {
             var schemaWarnings = await _store!.InitializeSchemaAsync(token);
             foreach (var warning in schemaWarnings) Logger.LogWarning("HSGo schema: {Warning}", warning);
+            var loaded = await _settingsRepository!.LoadOrSeedAsync(Config.CreateRuntimeSeed(), token);
+            _validation = ConfigValidator.Validate(Config, loaded.Settings);
+            foreach (var warning in _validation.Warnings) Logger.LogWarning("HSGo database config: {Warning}", warning);
+            if (!_validation.IsValid)
+            {
+                foreach (var error in _validation.Errors) Logger.LogError("HSGo database config: {Error}", error);
+                Logger.LogError("HSGo collection remains disabled. Correct hsgo_plugin_settings in the admin panel and reload the plugin.");
+                return;
+            }
+            _settings = loaded.Settings;
+            _settingsRevision = loaded.Revision;
+            _store.ApplyRuntimeSettings(_settings);
+            var blacklist = _settings.Season.LeaderboardBlacklistSteamIds
+                .Select(value => ulong.TryParse(value, out var steamId) ? steamId : 0)
+                .Where(steamId => steamId != 0)
+                .ToHashSet();
+            Volatile.Write(ref _configuredSeasonLeaderboardBlacklist, blacklist);
+            _scoring = new ScoringPolicy(_settings.Scoring);
+            _hsrScoring = new HsrScoringPolicy(_settings.GameXp);
+            _seasonRepository = new SeasonRepository(_store, _settings, _scoring);
+            var spoolPath = Path.Combine(ModuleDirectory, "data", "pending-events.jsonl");
+            _pipeline = new EventPipeline(_store, new DurableSpool(spoolPath, _settings.Persistence.PersistPendingEventsToDisk, message => Logger.LogWarning("{Message}", message)), _settings.Persistence,
+                message => Logger.LogInformation("{Message}", message),
+                (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
+            _missionRepository = new WeeklyMissionRepository(_store, _settings, Config.ServerId);
+            _missionPipeline = new WeeklyMissionPipeline(_missionRepository, _settings.Persistence,
+                Path.Combine(ModuleDirectory, "data", "pending-missions.jsonl"),
+                (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
+            _sessionRepository = new PlayerSessionRepository(_store, Config.ServerId);
+            _sessionPipeline = new PlayerSessionPipeline(_sessionRepository, _settings.Persistence,
+                Path.Combine(ModuleDirectory, "data", "pending-sessions.jsonl"),
+                (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
+            await _sessionPipeline.StartAsync(token);
+            await _sessionRepository.CloseOrphanedSessionsAsync(DateTimeOffset.UtcNow, token);
             await _store.SyncRatingTiersAsync(token);
             var now = DateTimeOffset.UtcNow;
             var refresh = await _seasonRepository!.RefreshAsync(now, token);
@@ -138,12 +167,17 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
             _pipeline!.Start();
             _missionPipeline!.Start();
             _ready = true;
+            Server.NextFrame(RegisterConfiguredCommands);
             var active = _seasonState.ActiveAt(now);
             var activeBlacklistCount = active is null ? 0 : _seasonLeaderboardBlacklistState.CountAt(active.Number);
             Logger.LogInformation("HSGo Stats is ready. ServerId={ServerId}, active season={Season}, configured future blacklist={ConfiguredCount}, active season blacklist={ActiveCount}, ban enforcement=disabled.",
                 Config.ServerId, active?.Name ?? "none", Volatile.Read(ref _configuredSeasonLeaderboardBlacklist).Count, activeBlacklistCount);
             foreach (var player in Utilities.GetPlayers())
-                if (TryIdentity(player, out var identity)) EnqueueMission(identity, "Ensure", at: now);
+                if (TryIdentity(player, out var identity))
+                {
+                    EnsurePlaySession(player, now);
+                    EnqueueMission(identity, "Ensure", at: now);
+                }
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
@@ -161,6 +195,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
             try
             {
                 var now = DateTimeOffset.UtcNow;
+                await RefreshDatabaseSettingsAsync(_lifetime.Token);
                 var result = await _seasonRepository.RefreshAsync(now, _lifetime.Token);
                 _seasonState.Replace(result.Seasons);
                 var effectiveFrom = GetNextBlacklistSeasonNumber(result.Seasons, now);
@@ -174,6 +209,53 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
             finally { Interlocked.Exchange(ref _refreshing, 0); }
         });
     }
+
+    private async Task RefreshDatabaseSettingsAsync(CancellationToken token)
+    {
+        var revision = await _settingsRepository!.GetRevisionTokenAsync(token);
+        if (revision == _settingsRevision || revision == _rejectedSettingsRevision) return;
+        var loaded = await _settingsRepository!.LoadOrSeedAsync(Config.CreateRuntimeSeed(), token);
+        if (loaded.Revision == _settingsRevision || loaded.Revision == _rejectedSettingsRevision) return;
+        var validation = ConfigValidator.Validate(Config, loaded.Settings);
+        if (!validation.IsValid)
+        {
+            _rejectedSettingsRevision = loaded.Revision;
+            foreach (var error in validation.Errors) Logger.LogError("Rejected database config revision {Revision}: {Error}", loaded.Revision, error);
+            return;
+        }
+
+        var persistenceChanged = !PersistenceMatches(_settings.Persistence, loaded.Settings.Persistence);
+        _settings.Enabled = loaded.Settings.Enabled;
+        _settings.Season = loaded.Settings.Season;
+        _settings.Scoring = loaded.Settings.Scoring;
+        _settings.GameXp = loaded.Settings.GameXp;
+        _settings.Rating = loaded.Settings.Rating;
+        _settings.WeeklyMissions = loaded.Settings.WeeklyMissions;
+        _settings.ChatCommands = loaded.Settings.ChatCommands;
+        _settings.Tracking = loaded.Settings.Tracking;
+        _settings.Bans = loaded.Settings.Bans;
+        _settings.Logging = loaded.Settings.Logging;
+        _store!.ApplyRuntimeSettings(_settings);
+        _scoring = new ScoringPolicy(_settings.Scoring);
+        _hsrScoring = new HsrScoringPolicy(_settings.GameXp);
+        _seasonRepository = new SeasonRepository(_store, _settings, _scoring);
+        Volatile.Write(ref _configuredSeasonLeaderboardBlacklist, _settings.Season.LeaderboardBlacklistSteamIds
+            .Select(value => ulong.TryParse(value, out var steamId) ? steamId : 0)
+            .Where(steamId => steamId != 0).ToHashSet());
+        await _store.SyncRatingTiersAsync(token);
+        Server.NextFrame(RegisterConfiguredCommands);
+        _settingsRevision = loaded.Revision;
+        _rejectedSettingsRevision = 0;
+        foreach (var warning in validation.Warnings) Logger.LogWarning("HSGo database config revision {Revision}: {Warning}", loaded.Revision, warning);
+        if (persistenceChanged) Logger.LogWarning("Persistence settings changed in the database and will take effect after a plugin/server reload; other revision {Revision} settings are active.", loaded.Revision);
+        Logger.LogInformation("Applied HSGo database config revision token {Revision}.", loaded.Revision);
+    }
+
+    private static bool PersistenceMatches(PersistenceConfig left, PersistenceConfig right) =>
+        left.BatchIntervalSeconds == right.BatchIntervalSeconds && left.MaxBatchSize == right.MaxBatchSize &&
+        left.MaxQueuedEvents == right.MaxQueuedEvents && left.RetryMaxAttempts == right.RetryMaxAttempts &&
+        left.RetryInitialDelaySeconds == right.RetryInitialDelaySeconds &&
+        left.PersistPendingEventsToDisk == right.PersistPendingEventsToDisk;
 
     private void OnMapStart(string mapName)
     {
@@ -204,7 +286,13 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     private HookResult OnPlayerDisconnect(EventPlayerDisconnect @event, GameEventInfo info)
     {
         var steamId = @event.Xuid != 0 ? @event.Xuid : @event.Userid?.SteamID ?? 0;
-        if (steamId != 0 && _playSessions.Remove(steamId, out var session)) FlushPlaytime(session, DateTimeOffset.UtcNow);
+        if (steamId != 0 && _playSessions.Remove(steamId, out var session))
+        {
+            var now = DateTimeOffset.UtcNow;
+            FlushPlaytime(session, now);
+            if (session.DatabaseOpened && !EnqueueSession(session, PlayerSessionSignalType.Close, now))
+                _playSessions[steamId] = session;
+        }
         _roundParticipants.Remove(steamId);
         return HookResult.Continue;
     }
@@ -214,12 +302,12 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         _roundParticipants.Clear();
         _lastGrenadeThrown.Clear();
         _bombPlanter = null;
-        if (Config.WeeklyMissions.Enabled && Config.ChatCommands.Missions.Enabled && Config.ChatCommands.RoundStartReminder.Enabled &&
+        if (_settings.WeeklyMissions.Enabled && _settings.ChatCommands.Missions.Enabled && _settings.ChatCommands.RoundStartReminder.Enabled &&
             ActiveSeason(DateTimeOffset.UtcNow) is not null &&
-            (Config.ChatCommands.RoundStartReminder.IncludeWarmup || !IsWarmup()))
+            (_settings.ChatCommands.RoundStartReminder.IncludeWarmup || !IsWarmup()))
         {
             foreach (var player in Utilities.GetPlayers())
-                if (TryIdentity(player, out _)) player!.PrintToChat(Config.ChatCommands.RoundStartReminder.Message);
+                if (TryIdentity(player, out _)) player!.PrintToChat(_settings.ChatCommands.RoundStartReminder.Message);
         }
         if (!CanObserveStats()) return HookResult.Continue;
         foreach (var player in Utilities.GetPlayers())
@@ -238,13 +326,13 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         foreach (var participant in _roundParticipants.Values)
         {
             var won = participant.Team == winner;
-            if (Config.Tracking.Rounds)
+            if (_settings.Tracking.Rounds)
             {
                 var delta = new StatDelta(
-                    Score: won && Config.Tracking.WinsAndLosses ? _scoring!.RoundWin : 0,
+                    Score: won && _settings.Tracking.WinsAndLosses ? _scoring!.RoundWin : 0,
                     RoundsPlayed: 1,
-                    RoundsWon: Config.Tracking.WinsAndLosses && won ? 1 : 0,
-                    RoundsLost: Config.Tracking.WinsAndLosses && !won ? 1 : 0);
+                    RoundsWon: _settings.Tracking.WinsAndLosses && won ? 1 : 0,
+                    RoundsLost: _settings.Tracking.WinsAndLosses && !won ? 1 : 0);
                 Enqueue("round_end", participant.Player, delta, null);
             }
             var observed = DateTimeOffset.UtcNow;
@@ -267,9 +355,9 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         var attackerValid = TryIdentity(@event.Attacker, out var attacker);
         var suicide = attackerValid && attacker.SteamId64 == victim.SteamId64;
         var teamKill = attackerValid && !suicide && @event.Attacker!.Team == @event.Userid!.Team;
-        var ignoredTeamKill = teamKill && Config.Tracking.ExcludeTeamKills;
+        var ignoredTeamKill = teamKill && _settings.Tracking.ExcludeTeamKills;
 
-        if (Config.Tracking.Deaths && !ignoredTeamKill)
+        if (_settings.Tracking.Deaths && !ignoredTeamKill)
         {
             var deathScore = teamKill ? 0 : _scoring!.Death(suicide);
             Enqueue(suicide ? "suicide" : attackerValid ? "death" : "world_death", victim,
@@ -281,10 +369,10 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
         if (attackerValid && !suicide && !teamKill)
         {
-            var headshot = Config.Tracking.Headshots && @event.Headshot;
+            var headshot = _settings.Tracking.Headshots && @event.Headshot;
             var weapon = NormalizeWeapon(@event.Weapon);
             var hsr = _hsrScoring!.Kill(weapon, @event.Headshot, @event.Noscope, @event.Thrusmoke, @event.Penetrated > 0, @event.Attackerblind, @event.Attackerinair);
-            if (Config.Tracking.Kills)
+            if (_settings.Tracking.Kills)
                 Enqueue("kill", attacker, new StatDelta(Kills: 1, HeadshotKills: headshot ? 1 : 0, Score: _scoring!.Kill(headshot)), weapon);
             EnqueueMission(attacker, "Kill", weapon: weapon, headshot: @event.Headshot, noScope: @event.Noscope,
                 throughSmoke: @event.Thrusmoke, penetrated: @event.Penetrated > 0, attackerBlind: @event.Attackerblind,
@@ -299,7 +387,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
         if (!teamKill && TryIdentity(@event.Assister, out var assister) && assister.SteamId64 != victim.SteamId64 && (!attackerValid || assister.SteamId64 != attacker.SteamId64))
         {
-            if (Config.Tracking.Assists)
+            if (_settings.Tracking.Assists)
                 Enqueue("assist", assister, new StatDelta(Assists: 1, Score: _scoring!.Assist), NormalizeWeapon(@event.Weapon));
             EnqueueMission(assister, "Assist", hsrDelta: _hsrScoring!.Assist);
             if (_roundParticipants.TryGetValue(assister.SteamId64, out var assisterRound)) assisterRound.Assists++;
@@ -315,9 +403,9 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         if (!CanObserveStats() || !TryIdentity(@event.Attacker, out var attacker) || !TryIdentity(@event.Userid, out var victim) || attacker.SteamId64 == victim.SteamId64)
             return HookResult.Continue;
         var teamDamage = @event.Attacker!.Team == @event.Userid!.Team;
-        if (teamDamage && Config.Tracking.ExcludeTeamKills) return HookResult.Continue;
-        var damage = Config.Tracking.Damage ? Math.Max(0, @event.DmgHealth) : 0;
-        var hits = Config.Tracking.ShotsAndHits ? 1 : 0;
+        if (teamDamage && _settings.Tracking.ExcludeTeamKills) return HookResult.Continue;
+        var damage = _settings.Tracking.Damage ? Math.Max(0, @event.DmgHealth) : 0;
+        var hits = _settings.Tracking.ShotsAndHits ? 1 : 0;
         var weapon = NormalizeWeapon(@event.Weapon);
         if (damage != 0 || hits != 0) Enqueue("damage", attacker, new StatDelta(Damage: damage, Hits: hits), weapon);
         var missionDamage = Math.Max(0, @event.DmgHealth);
@@ -327,7 +415,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private HookResult OnWeaponFire(EventWeaponFire @event, GameEventInfo info)
     {
-        if (CanObserveStats() && Config.Tracking.ShotsAndHits && TryIdentity(@event.Userid, out var player))
+        if (CanObserveStats() && _settings.Tracking.ShotsAndHits && TryIdentity(@event.Userid, out var player))
             Enqueue("shot", player, new StatDelta(Shots: 1), NormalizeWeapon(@event.Weapon));
         return HookResult.Continue;
     }
@@ -425,17 +513,23 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
             current.Add(identity.SteamId64);
             if (!_playSessions.TryGetValue(identity.SteamId64, out var session))
             {
-                _playSessions[identity.SteamId64] = new(identity, player!.Team, now);
+                EnsurePlaySession(player, now);
                 continue;
             }
+            EnsurePlaySession(player, now);
             FlushPlaytime(session, now);
             session.Team = player!.Team;
             session.LastObservedAt = now;
+            if (session.DatabaseOpened && now - session.LastSessionHeartbeatAt >= TimeSpan.FromMinutes(1) &&
+                EnqueueSession(session, PlayerSessionSignalType.Heartbeat, now))
+                session.LastSessionHeartbeatAt = now;
         }
         foreach (var stale in _playSessions.Keys.Where(x => !current.Contains(x)).ToArray())
         {
-            FlushPlaytime(_playSessions[stale], now);
-            _playSessions.Remove(stale);
+            var session = _playSessions[stale];
+            FlushPlaytime(session, now);
+            if (!session.DatabaseOpened || EnqueueSession(session, PlayerSessionSignalType.Close, now))
+                _playSessions.Remove(stale);
         }
     }
 
@@ -443,20 +537,37 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     {
         var seconds = Math.Clamp((long)(now - session.LastObservedAt).TotalSeconds, 0, 60);
         session.LastObservedAt = now;
-        if (seconds == 0 || !Config.Tracking.Playtime || !IsPlayingTeam(session.Team) || !CanObserveStats()) return;
+        if (seconds == 0 || !_settings.Tracking.Playtime || !IsPlayingTeam(session.Team) || !CanObserveStats()) return;
         Enqueue("playtime", session.Player, new StatDelta(PlaytimeSeconds: seconds), null, now);
     }
 
     private void EnsurePlaySession(CCSPlayerController? player, DateTimeOffset now)
     {
         if (!TryIdentity(player, out var identity)) return;
-        _playSessions.TryAdd(identity.SteamId64, new(identity, player!.Team, now));
+        if (!_playSessions.TryGetValue(identity.SteamId64, out var session))
+        {
+            session = new(identity, player!.Team, now);
+            _playSessions[identity.SteamId64] = session;
+        }
+        if (_ready && _settings.Enabled && !session.DatabaseOpened && EnqueueSession(session, PlayerSessionSignalType.Open, now))
+        {
+            session.DatabaseOpened = true;
+            session.LastSessionHeartbeatAt = now;
+        }
+    }
+
+    private bool EnqueueSession(PlaySession session, PlayerSessionSignalType type, DateTimeOffset observed)
+    {
+        if (_sessionPipeline is null) return false;
+        var accepted = _sessionPipeline.TryEnqueue(new(Guid.NewGuid(), session.SessionId, observed, session.Player, type));
+        if (!accepted) Logger.LogError("Player session queue is full; {Type} for {SteamId} was dropped.", type, session.Player.SteamId64);
+        return accepted;
     }
 
     private bool CanObserveStats()
     {
-        if (!_ready || !Config.Enabled) return false;
-        if (Config.Tracking.ExcludeWarmup && IsWarmup()) return false;
+        if (!_ready || !_settings.Enabled) return false;
+        if (_settings.Tracking.ExcludeWarmup && IsWarmup()) return false;
         return true;
     }
 
@@ -470,8 +581,8 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     {
         identity = default!;
         if (player is null || !player.IsValid || player.SteamID == 0 || player.IsHLTV ||
-            ((Config.Tracking.ExcludeBots || Config.WeeklyMissions.ExcludeBots) && player.IsBot)) return false;
-        var name = Config.Logging.IncludePlayerNames ? Truncate(player.PlayerName, 128) : null;
+            ((_settings.Tracking.ExcludeBots || _settings.WeeklyMissions.ExcludeBots) && player.IsBot)) return false;
+        var name = _settings.Logging.IncludePlayerNames ? Truncate(player.PlayerName, 128) : null;
         identity = new(player.SteamID, name);
         return true;
     }
@@ -480,13 +591,13 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     {
         if (delta.IsEmpty || _pipeline is null || _scoring is null) return;
         var observed = at ?? DateTimeOffset.UtcNow;
-        var season = Config.Season.Enabled ? _seasonState.ActiveAt(observed) : null;
+        var season = _settings.Season.Enabled ? _seasonState.ActiveAt(observed) : null;
         var excludeFromSeason = season is not null && _seasonLeaderboardBlacklistState.IsExcluded(player.SteamId64, season.Number);
-        var targets = TrackingTargets.Resolve(Config.Season.Enabled, Config.Season.PreseasonTracking, season is not null, excludeFromSeason);
+        var targets = TrackingTargets.Resolve(_settings.Season.Enabled, _settings.Season.PreseasonTracking, season is not null, excludeFromSeason);
         if (!targets.Any) return;
         _pipeline.TryEnqueue(new(Guid.NewGuid(), type, observed, Config.ServerId, player, season?.Id,
-            targets.ApplyGlobal, targets.ApplySeason, _scoring.Version, Config.Tracking.PerMap ? _currentMap : null,
-            Config.Tracking.PerWeapon ? weapon : null, delta));
+            targets.ApplyGlobal, targets.ApplySeason, _scoring.Version, _settings.Tracking.PerMap ? _currentMap : null,
+            _settings.Tracking.PerWeapon ? weapon : null, delta));
     }
 
     private void EnqueueMission(PlayerIdentity player, string eventName, int amount = 1, string? weapon = null,
@@ -504,12 +615,12 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private void EnqueueMission(MissionSignal signal)
     {
-        if (!_ready || (!Config.WeeklyMissions.Enabled && !Config.Rating.Enabled) || _missionPipeline is null) return;
-        if (!Config.WeeklyMissions.Enabled && signal.HsrDelta == 0) return;
+        if (!_ready || (!_settings.WeeklyMissions.Enabled && !_settings.Rating.Enabled) || _missionPipeline is null) return;
+        if (!_settings.WeeklyMissions.Enabled && signal.HsrDelta == 0) return;
         if (!_missionPipeline.TryEnqueue(signal)) Logger.LogError("Weekly mission queue is full; event {EventId} was dropped.", signal.EventId);
     }
 
-    private StoredSeason? ActiveSeason(DateTimeOffset at) => Config.Season.Enabled ? _seasonState.ActiveAt(at) : null;
+    private StoredSeason? ActiveSeason(DateTimeOffset at) => _settings.Season.Enabled ? _seasonState.ActiveAt(at) : null;
     private bool CanGrantSeason(PlayerIdentity player, StoredSeason? season) =>
         season is not null && !_seasonLeaderboardBlacklistState.IsExcluded(player.SteamId64, season.Number);
 
@@ -523,17 +634,17 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private void RegisterConfiguredCommands()
     {
-        if (Config.ChatCommands.Season.Enabled)
-            foreach (var alias in Config.ChatCommands.Season.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
-                AddCommand(alias, "Aktif HsGo sezonunu gösterir", OnSeasonCommand);
-        if (Config.ChatCommands.Missions.Enabled)
-            foreach (var alias in Config.ChatCommands.Missions.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
-                AddCommand(alias, "Haftalık görevleri gösterir", OnMissionsCommand);
+        if (_settings.ChatCommands.Season.Enabled)
+            foreach (var alias in _settings.ChatCommands.Season.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
+                if (_registeredSeasonCommands.Add(alias)) AddCommand(alias, "Aktif HsGo sezonunu gösterir", OnSeasonCommand);
+        if (_settings.ChatCommands.Missions.Enabled)
+            foreach (var alias in _settings.ChatCommands.Missions.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
+                if (_registeredMissionCommands.Add(alias)) AddCommand(alias, "Haftalık görevleri gösterir", OnMissionsCommand);
     }
 
     private void OnMissionsCommand(CCSPlayerController? player, CommandInfo info)
     {
-        if (!Config.WeeklyMissions.Enabled || !Config.ChatCommands.Missions.Enabled)
+        if (!_settings.WeeklyMissions.Enabled || !_settings.ChatCommands.Missions.Enabled)
         {
             info.ReplyToCommand("[HsGo] Haftalık görev sistemi kapalı.");
             return;
@@ -578,12 +689,12 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private void OnSeasonCommand(CCSPlayerController? player, CommandInfo info)
     {
-        if (!Config.ChatCommands.Season.Enabled)
+        if (!_settings.ChatCommands.Season.Enabled)
         {
             info.ReplyToCommand("[HsGo] Sezon komutu kapalı.");
             return;
         }
-        if (!Config.Rating.Enabled)
+        if (!_settings.Rating.Enabled)
         {
             info.ReplyToCommand("[HsGo] HSR sistemi kapalı.");
             return;
@@ -609,7 +720,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                 Server.NextFrame(() =>
                 {
                     if (player is null || !player.IsValid || view is null) return;
-                    var rating = RatingResolver.Resolve(view.Hsr, Config.Rating);
+                    var rating = RatingResolver.Resolve(view.Hsr, _settings.Rating);
                     var rank = view.Rank is null ? "Henüz sıralamada değilsin" : $"Sıralama: #{view.Rank}/{view.RankedPlayers}";
                     CommandReply(player, $"[HsGo] {view.Name} | {view.Hsr:N0} HSR ({rating.Tier.Name}) | {rank} | Kalan: {FormatRemaining(view.EndsAtUtc - DateTimeOffset.UtcNow)}");
                     CommandReply(player, $"[HsGo] Başlangıç: {FormatSeasonDate(view.StartsAtUtc)} | Bitiş: {FormatSeasonDate(view.EndsAtUtc)}");
@@ -631,7 +742,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private void CommandReply(CCSPlayerController player, string message)
     {
-        if (Config.ChatCommands.ReplyPrivately) player.PrintToChat(message);
+        if (_settings.ChatCommands.ReplyPrivately) player.PrintToChat(message);
         else Server.PrintToChatAll(message);
     }
 
@@ -645,8 +756,8 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private string FormatSeasonDate(DateTimeOffset value)
     {
-        var zone = TimeZoneInfo.FindSystemTimeZoneById(Config.Season.Timezone);
-        return $"{TimeZoneInfo.ConvertTime(value, zone):dd.MM.yyyy HH:mm} ({Config.Season.Timezone})";
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(_settings.Season.Timezone);
+        return $"{TimeZoneInfo.ConvertTime(value, zone):dd.MM.yyyy HH:mm} ({_settings.Season.Timezone})";
     }
 
     private static bool IsPlayingTeam(CsTeam team) => team is CsTeam.Terrorist or CsTeam.CounterTerrorist;
@@ -666,9 +777,12 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 
     private sealed class PlaySession(PlayerIdentity player, CsTeam team, DateTimeOffset lastObservedAt)
     {
+        public Guid SessionId { get; } = Guid.NewGuid();
         public PlayerIdentity Player { get; } = player;
         public CsTeam Team { get; set; } = team;
         public DateTimeOffset LastObservedAt { get; set; } = lastObservedAt;
+        public DateTimeOffset LastSessionHeartbeatAt { get; set; } = lastObservedAt;
+        public bool DatabaseOpened { get; set; }
     }
 
     private sealed class RoundParticipant(PlayerIdentity player, CsTeam team)

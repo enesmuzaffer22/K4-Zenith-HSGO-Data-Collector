@@ -20,6 +20,38 @@ internal static class SchemaSql
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """,
         """
+        CREATE TABLE IF NOT EXISTS hsgo_plugin_settings (
+          server_id VARCHAR(64) NOT NULL,
+          setting_key VARCHAR(64) NOT NULL,
+          setting_json LONGTEXT NOT NULL,
+          description VARCHAR(255) NULL,
+          revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+          updated_by VARCHAR(128) NULL,
+          created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+          updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+          PRIMARY KEY (server_id, setting_key),
+          KEY ix_hsgo_plugin_settings_updated (server_id, updated_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS hsgo_player_sessions (
+          session_id BINARY(16) NOT NULL PRIMARY KEY,
+          server_id VARCHAR(64) NOT NULL,
+          steam_id64 BIGINT UNSIGNED NOT NULL,
+          connected_at_utc DATETIME(6) NOT NULL,
+          last_seen_at_utc DATETIME(6) NOT NULL,
+          disconnected_at_utc DATETIME(6) NULL,
+          duration_seconds BIGINT UNSIGNED NULL,
+          close_reason VARCHAR(32) NULL,
+          created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+          updated_at DATETIME(6) NOT NULL,
+          KEY ix_hsgo_sessions_server_connected (server_id, connected_at_utc),
+          KEY ix_hsgo_sessions_server_seen (server_id, last_seen_at_utc),
+          KEY ix_hsgo_sessions_player_seen (server_id, steam_id64, last_seen_at_utc),
+          CONSTRAINT ck_hsgo_session_window CHECK (disconnected_at_utc IS NULL OR disconnected_at_utc >= connected_at_utc)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """,
+        """
         CREATE TABLE IF NOT EXISTS hsgo_seasons (
           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
           season_number INT NOT NULL,
@@ -155,7 +187,7 @@ internal static class SchemaSql
           KEY ix_hsgo_mission_events_observed (observed_at), KEY ix_hsgo_mission_events_player (server_id, steam_id64, observed_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """,
-        "INSERT IGNORE INTO hsgo_schema_migrations(version) VALUES (1), (2), (3), (4)"
+        "INSERT IGNORE INTO hsgo_schema_migrations(version) VALUES (1), (2), (3), (4), (5)"
     ];
 
     private static string BuildStatsTable(string name, string identity, string keys) => $"""

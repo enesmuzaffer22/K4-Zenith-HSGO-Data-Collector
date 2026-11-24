@@ -2,7 +2,11 @@
 
 Tüm nesneler `hsgo_` prefix'indedir. Plugin başka tabloyu okumaz/yazmaz; `DROP`/`TRUNCATE` kullanmaz. UTF-8 `utf8mb4`, UTC `DATETIME(6)`, signed BIGINT sayaçlar ve atomik `INSERT ... ON DUPLICATE KEY UPDATE` kullanılır.
 
-Ana tablolar: oyuncu kimliği (`hsgo_players`), config'ten senkronlanan manuel takvim (`hsgo_seasons`), sezon sıralama dışlama listesi (`hsgo_season_leaderboard_blacklist`), genel ve sezon sayaçları, global/sezon scope'lu map/weapon sayaçları, idempotency günlüğü (`hsgo_ingested_events`) ve sezondan bağımsız `hsgo_bans`.
+Ana tablolar: oyuncu kimliği (`hsgo_players`), admin panelinin çalışma ayarları (`hsgo_plugin_settings`), bağlantı oturumları (`hsgo_player_sessions`), DB ayarından senkronlanan manuel takvim (`hsgo_seasons`), sezon sıralama dışlama listesi (`hsgo_season_leaderboard_blacklist`), genel ve sezon sayaçları, global/sezon scope'lu map/weapon sayaçları, idempotency günlüğü (`hsgo_ingested_events`) ve sezondan bağımsız `hsgo_bans`.
+
+`hsgo_plugin_settings` satırları `server_id + setting_key` ile ayrılır. `setting_json` bölüm verisini, `revision` optimistic concurrency ve plugin yenileme sinyalini, `updated_by`/`updated_at` audit bilgisini taşır. DB bağlantı parolası bu tabloda bulunmaz. Plugin hatalı bir revizyonu reddeder ve son geçerli bellek snapshot'ını kullanır.
+
+`hsgo_player_sessions` bağlantı başına UUID, SteamID64, başlangıç, dakikalık heartbeat, kapanış ve süre tutar. Open/heartbeat/close olayları oyun thread'ini bekletmeyen dayanıklı kuyruktan yazılır. Temiz disconnect gerçek zamanı kapatır; crash sonrasında açık satır son heartbeat'te kapatılır. Bu nedenle sunucunun kapalı kaldığı süre oyuncu oturumuna eklenmez.
 
 HSR mevcut bağımsız `score` istatistiğini değiştirmez. Genel bakiye `hsgo_player_global_hsr`, sezon bakiyesi `hsgo_player_season_hsr`, web için tier eşikleri ve renkler `hsgo_rating_tiers` içindedir. Negatif XP güncellemeleri SQL transaction'ında minimum değere sıkıştırılır.
 
@@ -18,7 +22,7 @@ Manuel sezon takvimi MySQL `GET_LOCK`, unique season number/start ve generated `
 
 ## Yetki ve kurulum
 
-İlk açılış için CREATE TABLE ve INSERT yetkisi gerekir; DDL yoksa `sql/schema.sql` yetkili kullanıcıyla çalıştırılır. Runtime kullanıcıya en az SELECT/INSERT/UPDATE ve sezon lock kullanımı gerekir. Web için ayrı SELECT-only kullanıcı önerilir. 1.2.0 şeması `hsgo_seasons.is_configured` ve `hsgo_weekly_windows.season_id` gerektirir; eski bir 1.1.0 veritabanı kullanılıyorsa önce yedek alınmalı ve staging'de kontrollü şema geçişi yapılmalıdır. Plugin eksik kolonları sessizce dönüştürmez.
+İlk açılış için CREATE TABLE ve INSERT yetkisi gerekir; DDL yoksa `sql/schema.sql` yetkili kullanıcıyla çalıştırılır. Runtime kullanıcıya en az SELECT/INSERT/UPDATE ve sezon lock kullanımı gerekir. Admin backend hesabına yalnız gereken `hsgo_plugin_settings` ve rapor tabloları için sınırlı SELECT/UPDATE verilmelidir. 1.3.0, mevcut şemaya yalnız yeni `hsgo_plugin_settings` ve `hsgo_player_sessions` tablolarını ekler; `CREATE TABLE IF NOT EXISTS` ile 1.2.0 kurulumuna veri kaybetmeden eklenebilir.
 
 Şema MySQL 8.x/MariaDB'nin generated column, CHECK ve `DATETIME(6)` özelliklerini bekler. Prooyun motor/sürümü görülmediği için staging DB'de `schema.sql` doğrulaması zorunludur.
 
