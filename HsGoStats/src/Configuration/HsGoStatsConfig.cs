@@ -66,7 +66,7 @@ public sealed class SeasonConfig
     public bool PreseasonTracking { get; set; } = true;
     public List<SeasonScheduleEntryConfig> Schedule { get; set; } =
     [
-        new("Season 1", "2026-12-01T00:00:00+03:00", "2026-12-31T00:00:00+03:00")
+        new("Season 1", "2027-12-01T00:00:00+03:00", "2027-12-31T00:00:00+03:00")
     ];
     public List<string> LeaderboardBlacklistSteamIds { get; set; } = [];
 }
