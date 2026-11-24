@@ -4,7 +4,8 @@
 - Prooyun MySQL/MariaDB sürümü bilinmiyor; generated column/CHECK/`DATETIME(6)` DDL uyumluluğu staging DB'de doğrulanmalıdır.
 - Hedef sunucunun CounterStrikeSharp sürümü bilinmiyor. Paket API 1.0.379/.NET 10 gerektirir; güncel upstream 1.0.380 ile bir patch farkı vardır.
 - Gerçek iki oyunculu kill/assist/headshot, map change, disconnect, crash replay ve WeaponPaints/Prooyun birlikte çalışma testi yapılamadı: **NOT TESTED**.
-- Manuel C4 drop ile ölüm/oyun mekaniği drop'unu resmi event güvenilir biçimde ayırmıyor. Yanlış ceza vermemek için bomb drop/pickup skoru uygulanmaz; config alanları gelecekteki doğrulanmış entegrasyon içindir. Plant/defuse uygulanır.
+- C4 drop/pickup puanı ve ilerlemesi kullanıcı kararıyla bu sürümün kapsamı dışındadır. Plant, kendi bombasının patlaması ve defuse uygulanır.
+- Flash, molotof/incendiary ayrımı, C4 planter kimliği ve 1v2 clutch olay sırası gerçek Linux CS2 sunucusunda staging testi gerektirir.
 - Round played yalnız round başlangıcında T/CT olanları içerir. Ortada katılan oyuncu bir sonraki round'a kadar sayılmaz; spectator sayılmaz.
 - Playtime 10 saniyelik örneklenir, yalnız T/CT süresi sayılır ve tek örnek en çok 60 saniyedir. Normal disconnect/map/unload flush edilir; süreç event kuyruğuna girmeden aniden ölürse son örnek aralığı kaybolabilir.
 - Spool event consumer'a ulaştıktan sonra dayanıklıdır. Channel'a kabul ile consumer'ın diske append'i arasındaki çok dar crash penceresi için tam WAL garantisi yoktur.

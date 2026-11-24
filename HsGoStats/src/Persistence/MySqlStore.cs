@@ -30,16 +30,93 @@ public sealed class MySqlStore
         }.ConnectionString;
     }
 
-    public async Task InitializeSchemaAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> InitializeSchemaAsync(CancellationToken cancellationToken)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         await SetUtcSessionAsync(connection, cancellationToken);
+        var warnings = await InspectLegacyMissionSchemaAsync(connection, cancellationToken);
         foreach (var sql in SchemaSql.Commands)
         {
             await using var command = new MySqlCommand(sql, connection);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+        return warnings;
+    }
+
+    public async Task SyncRatingTiersAsync(CancellationToken token)
+    {
+        await using var connection = new MySqlConnection(_connectionString);
+        await connection.OpenAsync(token);
+        await SetUtcSessionAsync(connection, token);
+        await using var transaction = await connection.BeginTransactionAsync(token);
+        await using (var disable = new MySqlCommand("UPDATE hsgo_rating_tiers SET enabled=0,updated_at=UTC_TIMESTAMP(6) WHERE server_id=@server", connection, transaction))
+        {
+            disable.Parameters.AddWithValue("@server", _config.ServerId);
+            await disable.ExecuteNonQueryAsync(token);
+        }
+        const string sql = """
+            INSERT INTO hsgo_rating_tiers(server_id,tier_id,name,min_xp,color,enabled,updated_at)
+            VALUES(@server,@id,@name,@min,@color,1,UTC_TIMESTAMP(6))
+            ON DUPLICATE KEY UPDATE name=VALUES(name),min_xp=VALUES(min_xp),color=VALUES(color),enabled=1,updated_at=VALUES(updated_at)
+            """;
+        foreach (var tier in _config.Rating.Enabled ? _config.Rating.Tiers : [])
+        {
+            await using var command = new MySqlCommand(sql, connection, transaction);
+            command.Parameters.AddWithValue("@server", _config.ServerId);
+            command.Parameters.AddWithValue("@id", tier.Id);
+            command.Parameters.AddWithValue("@name", tier.Name);
+            command.Parameters.AddWithValue("@min", tier.MinXP);
+            command.Parameters.AddWithValue("@color", tier.Color);
+            await command.ExecuteNonQueryAsync(token);
+        }
+        await transaction.CommitAsync(token);
+    }
+
+    private static async Task<IReadOnlyList<string>> InspectLegacyMissionSchemaAsync(MySqlConnection connection, CancellationToken token)
+    {
+        var warnings = new List<string>();
+        const string tablesSql = "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name LIKE 'hsgo_weekly_%'";
+        var tables = new List<string>();
+        await using (var command = new MySqlCommand(tablesSql, connection))
+        await using (var reader = await command.ExecuteReaderAsync(token))
+            while (await reader.ReadAsync(token)) tables.Add(reader.GetString(0));
+        var known = new HashSet<string>(["hsgo_weekly_windows", "hsgo_weekly_assignments"], StringComparer.OrdinalIgnoreCase);
+        foreach (var table in tables.Where(x => !known.Contains(x)))
+            warnings.Add($"Unrecognized legacy/test weekly table '{table}' was found and left untouched.");
+        if (tables.Contains("hsgo_weekly_assignments", StringComparer.OrdinalIgnoreCase))
+        {
+            const string columnsSql = "SELECT column_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='hsgo_weekly_assignments'";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using var command = new MySqlCommand(columnsSql, connection);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) columns.Add(reader.GetString(0));
+            var required = new[] { "definition_json", "rewarded_at", "rewarded_season_id" };
+            var missing = required.Where(x => !columns.Contains(x)).ToArray();
+            if (missing.Length > 0) warnings.Add($"Legacy/test hsgo_weekly_assignments schema is missing {string.Join(", ", missing)}; no data or table was changed.");
+        }
+        if (tables.Contains("hsgo_weekly_windows", StringComparer.OrdinalIgnoreCase) &&
+            !await HasColumnAsync(connection, "hsgo_weekly_windows", "season_id", token))
+            warnings.Add("Legacy hsgo_weekly_windows is missing season_id; no data or table was changed.");
+        if (await TableExistsAsync(connection, "hsgo_seasons", token) &&
+            !await HasColumnAsync(connection, "hsgo_seasons", "is_configured", token))
+            warnings.Add("Legacy hsgo_seasons is missing is_configured; no data or table was changed.");
+        return warnings;
+    }
+
+    private static async Task<bool> TableExistsAsync(MySqlConnection connection, string table, CancellationToken token)
+    {
+        await using var command = new MySqlCommand("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=@table", connection);
+        command.Parameters.AddWithValue("@table", table);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(token)) > 0;
+    }
+
+    private static async Task<bool> HasColumnAsync(MySqlConnection connection, string table, string column, CancellationToken token)
+    {
+        await using var command = new MySqlCommand("SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=@table AND column_name=@column", connection);
+        command.Parameters.AddWithValue("@table", table);
+        command.Parameters.AddWithValue("@column", column);
+        return Convert.ToInt32(await command.ExecuteScalarAsync(token)) > 0;
     }
 
     public async Task<IReadOnlyList<SeasonLeaderboardBlacklistRule>> SyncSeasonLeaderboardBlacklistAsync(

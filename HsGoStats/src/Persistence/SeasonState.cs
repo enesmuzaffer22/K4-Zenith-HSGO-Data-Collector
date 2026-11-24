@@ -17,4 +17,7 @@ public sealed class SeasonState
         var season = At(instant);
         return season?.Status is "active" or "scheduled" ? season : null;
     }
+
+    public StoredSeason? NextAfter(DateTimeOffset instant) =>
+        Volatile.Read(ref _seasons).FirstOrDefault(x => x.StartsAtUtc > instant);
 }

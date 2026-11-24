@@ -1,4 +1,46 @@
-# Test report — 2026-11-23
+# Test report
+
+## 2026-11-24 — Manuel sezon takvimi sürümü 1.2.0
+
+| Check | Result |
+|---|---|
+| Release build | PASS — 0 warning, 0 error |
+| Unit tests | PASS — 36/36 |
+| Özel sezon adı + kesin başlangıç/bitiş | PASS |
+| Çakışan sezon ve ofsetsiz tarih reddi | PASS |
+| Sezonlar arasındaki boşluk | PASS |
+| Başlangıç dahil / bitiş hariç sınırlar | PASS |
+| İlk görev haftasının sezon başlangıcında kırpılması | PASS |
+| Son görev haftasının sezon bitişinde kırpılması | PASS |
+| Sezon dışında haftalık pencere reddi | PASS |
+| Örnek ve yayın JSON parse | PASS |
+| C4 drop/pick event handler veya XP | PASS — kapsam dışında, eklenmedi |
+| Release archive | `HsGoStats-v1.2.0.zip`, 565117 bytes, SHA-256 `B4DF59AA9DFF2E2C51C4ABA236F05B37565A48CAB32E15B0E29F9EDC500A47F8` |
+| Gerçek CS2 ve MySQL takvim/DDL entegrasyonu | NOT TESTED — staging sunucusu/veritabanı gerekli |
+
+Test paketi sandbox dışındaki izinli VSTest çalıştırmasında 36/36 geçti. MySQL repository davranışı statik olarak ve derleme ile doğrulandı; canlı DB iddiası yapılmaz.
+
+## 2026-11-24 — HSR ve haftalık görev sürümü 1.1.0
+
+| Check | Result |
+|---|---|
+| Release build | PASS — 0 warning, 0 error |
+| Unit tests | PASS — 30/30 |
+| 100 görev ID / 9 kategori | PASS |
+| Katalog toplam ödülü | PASS — 17.145 XP |
+| Tier eşik altı/eşiği/üstü ve Legend üstü | PASS |
+| Europe/Istanbul Pazartesi sınırı | PASS |
+| 33/34/35/51/52 özel kuralları | PASS |
+| Scoped görevde NoScope reddi | PASS |
+| 35/52 farklı raund ve tek ilerleme | PASS |
+| Raundluk flash ilerlemesinin replace davranışı | PASS |
+| C4 drop/pick event handler veya XP | PASS — kapsam dışında, eklenmedi |
+| Release archive | `HsGoStats-v1.1.0.zip`, 565137 bytes, SHA-256 `93F8ED48AF47BC2689C3CB8BB53821EA48475317917EAD113393503C4FA89A89` |
+| Gerçek CS2 ve MySQL fault-injection | NOT TESTED — staging sunucusu/veritabanı gerekli |
+
+Sandbox içindeki ilk VSTest denemesi testhost IPC kısıtı nedeniyle bağlanamadı. Aynı derlenmiş test paketi sandbox dışında çalıştırıldı ve 30/30 geçti.
+
+## 2026-11-23 — İstatistik toplayıcı sürümü 1.0.1 (tarihsel)
 
 | Check | Command / evidence | Result |
 |---|---|---|
