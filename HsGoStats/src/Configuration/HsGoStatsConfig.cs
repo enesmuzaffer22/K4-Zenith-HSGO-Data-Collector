@@ -75,6 +75,8 @@ public sealed record SeasonScheduleEntryConfig(string Name, string StartsAt, str
 
 public sealed class ScoringConfig
 {
+    public int StartingScore { get; set; } = 200;
+    public int MinimumScore { get; set; }
     public int Kill { get; set; } = 10;
     public int HeadshotBonus { get; set; } = 5;
     public int Assist { get; set; } = 4;
@@ -113,6 +115,7 @@ public sealed class GameXpConfig
 public sealed class RatingConfig
 {
     public bool Enabled { get; set; } = true;
+    public int StartingXP { get; set; } = 200;
     public int MinimumXP { get; set; }
     public bool AllowDemotion { get; set; } = true;
     public List<RatingTierConfig> Tiers { get; set; } =

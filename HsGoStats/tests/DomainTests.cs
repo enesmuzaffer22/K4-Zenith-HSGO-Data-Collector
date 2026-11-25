@@ -301,6 +301,31 @@ public sealed class DomainTests
     }
 
     [Fact]
+    public void DefaultPointEconomyStartsAtTwoHundredAndFloorsAtZero()
+    {
+        var settings = new HsGoStatsRuntimeSettings();
+
+        Assert.Equal(200, settings.Scoring.StartingScore);
+        Assert.Equal(0, settings.Scoring.MinimumScore);
+        Assert.Equal(200, settings.Rating.StartingXP);
+        Assert.Equal(0, settings.Rating.MinimumXP);
+    }
+
+    [Fact]
+    public void PointEconomyRejectsStartingBalancesBelowTheirFloors()
+    {
+        var config = ValidConfig();
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Scoring.StartingScore = -1;
+        settings.Rating.StartingXP = -1;
+
+        var result = ConfigValidator.Validate(config, settings);
+
+        Assert.Contains(result.Errors, value => value.Contains("StartingScore"));
+        Assert.Contains(result.Errors, value => value.Contains("StartingXP"));
+    }
+
+    [Fact]
     public void ScopedMissionRejectsNoScopeAndAcceptsScopedKill()
     {
         var mission = MissionCatalogDefaults.Create().Single(x => x.Id == 51);

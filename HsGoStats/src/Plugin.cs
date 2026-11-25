@@ -16,7 +16,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 {
     public override string ModuleName => "HSGo Stats Collector";
     public override string ModuleAuthor => "HSGo / K4-Zenith contributors";
-    public override string ModuleVersion => "1.3.2";
+    public override string ModuleVersion => "1.4.0";
     public override string ModuleDescription => "Standalone HSR, weekly mission, season and MySQL statistics collector.";
 
     public HsGoStatsConfig Config { get; set; } = new();
@@ -166,6 +166,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                 (message, ex) => { if (ex is null) Logger.LogError("{Message}", message); else Logger.LogError(ex, "{Message}", message); });
             await _sessionPipeline.StartAsync(token);
             await _sessionRepository.CloseOrphanedSessionsAsync(DateTimeOffset.UtcNow, token);
+            await _store.ClampPointFloorsAsync(token);
             await _store.SyncRatingTiersAsync(token);
             var now = DateTimeOffset.UtcNow;
             var refresh = await _seasonRepository!.RefreshAsync(now, token);
@@ -257,6 +258,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         Volatile.Write(ref _configuredSeasonLeaderboardBlacklist, _settings.Season.LeaderboardBlacklistSteamIds
             .Select(value => ulong.TryParse(value, out var steamId) ? steamId : 0)
             .Where(steamId => steamId != 0).ToHashSet());
+        await _store.ClampPointFloorsAsync(token);
         await _store.SyncRatingTiersAsync(token);
         Server.NextFrame(RegisterConfiguredCommands);
         _settingsRevision = loaded.Revision;
@@ -740,7 +742,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                     }
                     CommandReply(player, $"[HsGo] Haftalık görevler | Kalan: {FormatRemaining(missions[0].EndsAtUtc - DateTimeOffset.UtcNow)}");
                     foreach (var mission in missions)
-                        CommandReply(player, $"[HsGo] K{mission.Category} #{mission.MissionId}: {mission.Description} ({mission.Progress}/{mission.Target}) | +{mission.RewardXp} XP{(mission.Completed ? " | TAMAMLANDI" : "")}");
+                        CommandReply(player, $"[HsGo] K{mission.Category} #{mission.MissionId}: {mission.Description} ({mission.Progress}/{mission.Target}) | +{mission.RewardXp} TP{(mission.Completed ? " | TAMAMLANDI" : "")}");
                 });
             }
             catch (Exception ex)
@@ -760,7 +762,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         }
         if (!_settings.Rating.Enabled)
         {
-            info.ReplyToCommand("[HsGo] HSR sistemi kapalı.");
+            info.ReplyToCommand("[HsGo] TP sistemi kapalı.");
             return;
         }
         if (!TryIdentity(player, out var identity) || _missionRepository is null || _lifetime is null)
@@ -786,7 +788,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                     if (player is null || !player.IsValid || view is null) return;
                     var rating = RatingResolver.Resolve(view.Hsr, _settings.Rating);
                     var rank = view.Rank is null ? "Henüz sıralamada değilsin" : $"Sıralama: #{view.Rank}/{view.RankedPlayers}";
-                    CommandReply(player, $"[HsGo] {view.Name} | {view.Hsr:N0} HSR ({rating.Tier.Name}) | {rank} | Kalan: {FormatRemaining(view.EndsAtUtc - DateTimeOffset.UtcNow)}");
+                    CommandReply(player, $"[HsGo] {view.Name} | {view.Hsr:N0} TP ({rating.Tier.Name}) | {rank} | Kalan: {FormatRemaining(view.EndsAtUtc - DateTimeOffset.UtcNow)}");
                     CommandReply(player, $"[HsGo] Başlangıç: {FormatSeasonDate(view.StartsAtUtc)} | Bitiş: {FormatSeasonDate(view.EndsAtUtc)}");
                 });
             }

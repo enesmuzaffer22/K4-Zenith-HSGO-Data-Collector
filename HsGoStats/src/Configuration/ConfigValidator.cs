@@ -106,7 +106,10 @@ public static class ConfigValidator
         if (positiveGameXp.Any(x => x < 0)) errors.Add("GameXp reward values cannot be negative.");
         if (gameXp.Death > 0 || gameXp.Suicide > 0) errors.Add("GameXp death and suicide values cannot be positive.");
 
+        if (scoring.MinimumScore < 0) errors.Add("Scoring.MinimumScore cannot be negative.");
+        if (scoring.StartingScore < scoring.MinimumScore) errors.Add("Scoring.StartingScore cannot be lower than Scoring.MinimumScore.");
         if (rating.MinimumXP < 0) errors.Add("Rating.MinimumXP cannot be negative.");
+        if (rating.StartingXP < rating.MinimumXP) errors.Add("Rating.StartingXP cannot be lower than Rating.MinimumXP.");
         if (tiers.Count == 0) errors.Add("Rating.Tiers must contain at least one tier.");
         else
         {
