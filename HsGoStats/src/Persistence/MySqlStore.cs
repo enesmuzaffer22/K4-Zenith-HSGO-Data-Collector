@@ -33,7 +33,7 @@ public sealed class MySqlStore
 
     public void ApplyRuntimeSettings(HsGoStatsRuntimeSettings settings) => _settings = settings;
 
-    public async Task ClampPointFloorsAsync(CancellationToken token)
+    public async Task ClampTpFloorAsync(CancellationToken token)
     {
         await using var connection = new MySqlConnection(_connectionString);
         await connection.OpenAsync(token);
@@ -41,10 +41,6 @@ public sealed class MySqlStore
         await using var transaction = await connection.BeginTransactionAsync(token);
         var targets = new (string Table, string Column, long Minimum)[]
         {
-            ("hsgo_player_global_stats", "score", _settings.Scoring.MinimumScore),
-            ("hsgo_player_season_stats", "score", _settings.Scoring.MinimumScore),
-            ("hsgo_map_stats", "score", _settings.Scoring.MinimumScore),
-            ("hsgo_weapon_stats", "score", _settings.Scoring.MinimumScore),
             ("hsgo_player_global_hsr", "hsr", _settings.Rating.MinimumXP),
             ("hsgo_player_season_hsr", "hsr", _settings.Rating.MinimumXP)
         };
@@ -298,20 +294,18 @@ public sealed class MySqlStore
         await command.ExecuteNonQueryAsync(token);
     }
 
-    private async Task UpsertStatsAsync(MySqlConnection connection, MySqlTransaction transaction, string table, bool seasonal, NormalizedStatEvent item, CancellationToken token)
+    private static async Task UpsertStatsAsync(MySqlConnection connection, MySqlTransaction transaction, string table, bool seasonal, NormalizedStatEvent item, CancellationToken token)
     {
         var identityColumns = seasonal ? "season_id, server_id, steam_id64" : "server_id, steam_id64";
         var identityValues = seasonal ? "@season_id, @server_id, @steam_id64" : "@server_id, @steam_id64";
         var sql = $"""
             INSERT INTO {table} ({identityColumns}, kills, deaths, assists, headshot_kills, damage, score,
               rounds_played, rounds_won, rounds_lost, playtime_seconds, shots, hits, bomb_plants, bomb_defuses, updated_at)
-            VALUES ({identityValues}, @kills, @deaths, @assists, @headshots, @damage,
-              GREATEST(@minimum_score,@starting_score+@score_delta),
+            VALUES ({identityValues}, @kills, @deaths, @assists, @headshots, @damage, @score,
               @rounds_played, @rounds_won, @rounds_lost, @playtime, @shots, @hits, @plants, @defuses, @updated_at)
             ON DUPLICATE KEY UPDATE
               kills = kills + VALUES(kills), deaths = deaths + VALUES(deaths), assists = assists + VALUES(assists),
-              headshot_kills = headshot_kills + VALUES(headshot_kills), damage = damage + VALUES(damage),
-              score = GREATEST(@minimum_score,score+@score_delta),
+              headshot_kills = headshot_kills + VALUES(headshot_kills), damage = damage + VALUES(damage), score = score + VALUES(score),
               rounds_played = rounds_played + VALUES(rounds_played), rounds_won = rounds_won + VALUES(rounds_won),
               rounds_lost = rounds_lost + VALUES(rounds_lost), playtime_seconds = playtime_seconds + VALUES(playtime_seconds),
               shots = shots + VALUES(shots), hits = hits + VALUES(hits), bomb_plants = bomb_plants + VALUES(bomb_plants),
@@ -323,17 +317,16 @@ public sealed class MySqlStore
         await command.ExecuteNonQueryAsync(token);
     }
 
-    private async Task UpsertDimensionAsync(MySqlConnection connection, MySqlTransaction transaction, string table, string column, string scope, long periodId, string value, NormalizedStatEvent item, CancellationToken token)
+    private static async Task UpsertDimensionAsync(MySqlConnection connection, MySqlTransaction transaction, string table, string column, string scope, long periodId, string value, NormalizedStatEvent item, CancellationToken token)
     {
         var sql = $"""
             INSERT INTO {table} (scope, period_id, server_id, steam_id64, {column}, kills, deaths, assists, headshot_kills,
               damage, score, rounds_played, rounds_won, rounds_lost, playtime_seconds, shots, hits, bomb_plants, bomb_defuses, updated_at)
             VALUES (@scope, @period_id, @server_id, @steam_id64, @dimension, @kills, @deaths, @assists, @headshots,
-              @damage, GREATEST(@minimum_score,@score_delta), @rounds_played, @rounds_won, @rounds_lost, @playtime, @shots, @hits, @plants, @defuses, @updated_at)
+              @damage, @score, @rounds_played, @rounds_won, @rounds_lost, @playtime, @shots, @hits, @plants, @defuses, @updated_at)
             ON DUPLICATE KEY UPDATE
               kills = kills + VALUES(kills), deaths = deaths + VALUES(deaths), assists = assists + VALUES(assists),
-              headshot_kills = headshot_kills + VALUES(headshot_kills), damage = damage + VALUES(damage),
-              score = GREATEST(@minimum_score,score+@score_delta),
+              headshot_kills = headshot_kills + VALUES(headshot_kills), damage = damage + VALUES(damage), score = score + VALUES(score),
               rounds_played = rounds_played + VALUES(rounds_played), rounds_won = rounds_won + VALUES(rounds_won),
               rounds_lost = rounds_lost + VALUES(rounds_lost), playtime_seconds = playtime_seconds + VALUES(playtime_seconds),
               shots = shots + VALUES(shots), hits = hits + VALUES(hits), bomb_plants = bomb_plants + VALUES(bomb_plants),
@@ -347,7 +340,7 @@ public sealed class MySqlStore
         await command.ExecuteNonQueryAsync(token);
     }
 
-    private void AddStatParameters(MySqlCommand command, NormalizedStatEvent item)
+    private static void AddStatParameters(MySqlCommand command, NormalizedStatEvent item)
     {
         var d = item.Delta;
         command.Parameters.AddWithValue("@server_id", item.ServerId);
@@ -357,9 +350,7 @@ public sealed class MySqlStore
         command.Parameters.AddWithValue("@assists", d.Assists);
         command.Parameters.AddWithValue("@headshots", d.HeadshotKills);
         command.Parameters.AddWithValue("@damage", d.Damage);
-        command.Parameters.AddWithValue("@score_delta", d.Score);
-        command.Parameters.AddWithValue("@starting_score", _settings.Scoring.StartingScore);
-        command.Parameters.AddWithValue("@minimum_score", _settings.Scoring.MinimumScore);
+        command.Parameters.AddWithValue("@score", d.Score);
         command.Parameters.AddWithValue("@rounds_played", d.RoundsPlayed);
         command.Parameters.AddWithValue("@rounds_won", d.RoundsWon);
         command.Parameters.AddWithValue("@rounds_lost", d.RoundsLost);

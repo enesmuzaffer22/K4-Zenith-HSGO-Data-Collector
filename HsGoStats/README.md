@@ -1,6 +1,6 @@
-# HSGo Stats Collector 1.4.0
+# HSGo Stats Collector 1.4.1
 
-Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, HSR ve haftalık görev eklentisidir. Zenith, menü, admin, rank veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. HUD, clan tag, skor tablosu, skin, ConVar veya ban enforcement eklemez.
+Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, TP ve haftalık görev eklentisidir. Zenith, menü, admin, rank veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. HUD, clan tag, skor tablosu, skin, ConVar veya ban enforcement eklemez.
 
 ## Uyumluluk
 
@@ -32,9 +32,9 @@ Release çıktısı `src/bin/Release/net10.0` altındadır. Paket yeniden üretm
 
 - Kill/death/assist/headshot, gerçek oyuncu hasarı, round, skor, playtime, harita ve silah sayaçları.
 - Genel ve sezonluk satırlar aynı idempotent transaction içinde ayrı artırılır.
-- Oyun aksiyonlarından bağımsız genel/sezon HSR bakiyeleri, sekiz config kontrollü tier ve renk.
+- Oyun aksiyonları ve görevlerle ilerleyen ayrı genel/sezon TP bakiyeleri, sekiz config kontrollü tier ve renk.
 - Elle adlandırılan, kesin başlangıç/bitiş saatli sezon takvimi; otomatik sezon üretimi yoktur.
-- Sezon, görev, HSR, tracking ve diğer çalışma ayarları admin paneline uygun `hsgo_plugin_settings` tablosundan okunur; geçersiz revizyon son geçerli ayarı bozmaz.
+- Sezon, görev, TP, tracking ve diğer çalışma ayarları admin paneline uygun `hsgo_plugin_settings` tablosundan okunur; geçersiz revizyon son geçerli ayarı bozmaz.
 - Europe/Istanbul Pazartesi rotasyonlu, yalnız aktif sezon içinde yaşayan oyuncuya özel dokuz haftalık görev; ilk ve son görev haftası sezon sınırında kırpılır.
 - `hsgo_player_sessions` üzerinden son 24 saat benzersiz oyuncu, başlayan oturum ve ortalama oturum süresi raporu.
 - `!sezon` ve ASCII `!gorevler` komutları ile config kontrollü raund başı hatırlatma.
@@ -43,6 +43,6 @@ Release çıktısı `src/bin/Release/net10.0` altındadır. Paket yeniden üretm
 - `event_id` + `hsgo_ingested_events` tekrar oynatmada çift artırmayı engeller.
 - Bounded queue, exponential retry ve isteğe bağlı disk spool oyun thread'ini DB/disk I/O'dan ayırır.
 - Ban tablosu yalnız arşivdir; SQL kaydı oyuncuyu banlamaz.
-- C4 drop/pick puanı kullanıcı kararıyla kapsam dışıdır; plant/explode/defuse XP ve görevleri aktiftir.
+- C4 drop/pick puanı kullanıcı kararıyla kapsam dışıdır; plant/explode/defuse TP ve görevleri aktiftir.
 
 Ayrıntılar için `CONFIGURATION.md`, `ADMIN_PANEL.md`, `DATABASE.md`, `LIMITATIONS.md` ve `TEST_REPORT.md` dosyalarına bakın.

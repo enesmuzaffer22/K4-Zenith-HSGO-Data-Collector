@@ -28,7 +28,7 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
     {
         if (!await ClaimAsync(connection, transaction, signal, token)) return;
         await UpsertPlayerAsync(connection, transaction, signal, token);
-        await SeedPointBalancesAsync(connection, transaction, signal, token);
+        await SeedTpBalancesAsync(connection, transaction, signal, token);
         if (config.Rating.Enabled && signal.HsrDelta != 0)
             await ApplyGameplayHsrAsync(connection, transaction, signal, token);
         if (!config.WeeklyMissions.Enabled) return;
@@ -86,16 +86,29 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
         await using var connection = store.CreateConnection();
         await connection.OpenAsync(token);
         await MySqlStore.SetUtcSessionAsync(connection, token);
+
+        const string globalTpSql = "SELECT hsr FROM hsgo_player_global_hsr WHERE server_id=@server AND steam_id64=@steam";
+        long globalTp;
+        await using (var globalTpCommand = new MySqlCommand(globalTpSql, connection))
+        {
+            globalTpCommand.Parameters.AddWithValue("@server", serverId);
+            globalTpCommand.Parameters.AddWithValue("@steam", steamId);
+            var value = await globalTpCommand.ExecuteScalarAsync(token);
+            globalTp = value is null ? config.Rating.StartingXP : Convert.ToInt64(value);
+        }
+
         const string hsrSql = "SELECT hsr FROM hsgo_player_season_hsr WHERE season_id=@season AND server_id=@server AND steam_id64=@steam";
-        long hsr;
+        long seasonTp;
         await using (var hsrCommand = new MySqlCommand(hsrSql, connection))
         {
             hsrCommand.Parameters.AddWithValue("@season", season.Id);
             hsrCommand.Parameters.AddWithValue("@server", serverId);
             hsrCommand.Parameters.AddWithValue("@steam", steamId);
             var value = await hsrCommand.ExecuteScalarAsync(token);
-            if (value is null) return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc, 0, null, 0);
-            hsr = Convert.ToInt64(value);
+            if (value is null)
+                return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc,
+                    globalTp, config.Rating.StartingXP, null, 0);
+            seasonTp = Convert.ToInt64(value);
         }
 
         const string rankSql = """
@@ -114,11 +127,11 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
         rankCommand.Parameters.AddWithValue("@season", season.Id);
         rankCommand.Parameters.AddWithValue("@server", serverId);
         rankCommand.Parameters.AddWithValue("@steam", steamId);
-        rankCommand.Parameters.AddWithValue("@hsr", hsr);
+        rankCommand.Parameters.AddWithValue("@hsr", seasonTp);
         rankCommand.Parameters.AddWithValue("@number", season.Number);
         await using var rankReader = await rankCommand.ExecuteReaderAsync(token);
         await rankReader.ReadAsync(token);
-        return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc, hsr,
+        return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc, globalTp, seasonTp,
             rankReader.IsDBNull(0) ? null : Convert.ToInt64(rankReader.GetValue(0)), Convert.ToInt64(rankReader.GetValue(1)));
     }
 
@@ -300,18 +313,8 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
         await command.ExecuteNonQueryAsync(token);
     }
 
-    private async Task SeedPointBalancesAsync(MySqlConnection connection, MySqlTransaction transaction, MissionSignal signal, CancellationToken token)
+    private async Task SeedTpBalancesAsync(MySqlConnection connection, MySqlTransaction transaction, MissionSignal signal, CancellationToken token)
     {
-        const string globalPpSql = "INSERT IGNORE INTO hsgo_player_global_stats(server_id,steam_id64,score,updated_at) VALUES(@server,@steam,@pp,@at)";
-        await using (var command = new MySqlCommand(globalPpSql, connection, transaction))
-        {
-            command.Parameters.AddWithValue("@server", serverId);
-            command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
-            command.Parameters.AddWithValue("@pp", config.Scoring.StartingScore);
-            command.Parameters.AddWithValue("@at", signal.ObservedAt.UtcDateTime);
-            await command.ExecuteNonQueryAsync(token);
-        }
-
         const string globalTpSql = "INSERT IGNORE INTO hsgo_player_global_hsr(server_id,steam_id64,hsr,updated_at) VALUES(@server,@steam,@tp,@at)";
         await using (var command = new MySqlCommand(globalTpSql, connection, transaction))
         {
@@ -323,17 +326,6 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
         }
 
         if (!signal.HasActiveSeason || !signal.GrantSeason || signal.ActiveSeasonId is null) return;
-
-        const string seasonPpSql = "INSERT IGNORE INTO hsgo_player_season_stats(season_id,server_id,steam_id64,score,updated_at) VALUES(@season,@server,@steam,@pp,@at)";
-        await using (var command = new MySqlCommand(seasonPpSql, connection, transaction))
-        {
-            command.Parameters.AddWithValue("@season", signal.ActiveSeasonId.Value);
-            command.Parameters.AddWithValue("@server", serverId);
-            command.Parameters.AddWithValue("@steam", signal.Player.SteamId64);
-            command.Parameters.AddWithValue("@pp", config.Scoring.StartingScore);
-            command.Parameters.AddWithValue("@at", signal.ObservedAt.UtcDateTime);
-            await command.ExecuteNonQueryAsync(token);
-        }
 
         const string seasonTpSql = "INSERT IGNORE INTO hsgo_player_season_hsr(season_id,server_id,steam_id64,hsr,updated_at) VALUES(@season,@server,@steam,@tp,@at)";
         await using var seasonTp = new MySqlCommand(seasonTpSql, connection, transaction);

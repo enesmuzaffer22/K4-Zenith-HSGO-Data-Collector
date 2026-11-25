@@ -75,8 +75,6 @@ public sealed record SeasonScheduleEntryConfig(string Name, string StartsAt, str
 
 public sealed class ScoringConfig
 {
-    public int StartingScore { get; set; } = 200;
-    public int MinimumScore { get; set; }
     public int Kill { get; set; } = 10;
     public int HeadshotBonus { get; set; } = 5;
     public int Assist { get; set; } = 4;

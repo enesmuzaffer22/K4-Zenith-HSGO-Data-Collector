@@ -66,7 +66,8 @@ public sealed record MissionSignal(
     IReadOnlyDictionary<string, int>? RoundWeaponKills = null);
 
 public sealed record MissionProgressView(int MissionId, int Category, string Description, int Progress, int Target, int RewardXp, bool Completed, DateTimeOffset EndsAtUtc);
-public sealed record SeasonCommandView(string Name, int Number, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc, long Hsr, long? Rank, long RankedPlayers);
+public sealed record SeasonCommandView(string Name, int Number, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc,
+    long GlobalTp, long SeasonTp, long? Rank, long RankedPlayers);
 
 public sealed record MissionProgressDelta(bool Matched, int Amount, bool Replace);
 
