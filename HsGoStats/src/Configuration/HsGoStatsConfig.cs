@@ -116,20 +116,32 @@ public sealed class RatingConfig
     public int StartingXP { get; set; } = 200;
     public int MinimumXP { get; set; }
     public bool AllowDemotion { get; set; } = true;
+    public ScoreboardRankConfig Scoreboard { get; set; } = new();
     public List<RatingTierConfig> Tiers { get; set; } =
     [
-        new(1, "Iron", 0, "#9CA3AF"),
-        new(2, "Bronze", 1_000, "#CD8A50"),
-        new(3, "Silver", 3_000, "#E2E8F0"),
-        new(4, "Gold", 7_000, "#EAB308"),
-        new(5, "Platinum", 12_500, "#22D3EE"),
-        new(6, "Diamond", 20_000, "#6366F1"),
-        new(7, "Master", 35_000, "#D946EF"),
-        new(8, "Legend", 60_000, "#EF4444")
+        new(1, "Recruit", 0, "#B3B2B2"),
+        new(2, "Soldier", 1_000, "#BF8C47"),
+        new(3, "Trooper", 3_000, "#FFFFFF"),
+        new(4, "Veteran", 6_000, "#F8A815"),
+        new(5, "Warrior", 10_000, "#58C3E4"),
+        new(6, "Warlord", 15_000, "#8693C9"),
+        new(7, "Phantom", 22_500, "#E8375D"),
+        new(8, "Supreme", 32_500, "#8575B4"),
+        new(9, "Conquer", 45_000, "#EC651C"),
+        new(10, "Immortal", 60_000, "#E52421")
     ];
 }
 
 public sealed record RatingTierConfig(int Id, string Name, long MinXP, string Color);
+
+public sealed class ScoreboardRankConfig
+{
+    public bool Enabled { get; set; } = true;
+    public int SkillGroupBaseId { get; set; } = 19_010_001;
+    public int RefreshSeconds { get; set; } = 5;
+    public bool UseActiveSeason { get; set; } = true;
+    public bool FallbackToGlobal { get; set; } = true;
+}
 
 public sealed class WeeklyMissionsConfig
 {
@@ -165,6 +177,7 @@ public sealed class ChatCommandsConfig
 {
     public ChatCommandConfig Season { get; set; } = new(true, ["!sezon"]);
     public ChatCommandConfig Missions { get; set; } = new(true, ["!gorevler"]);
+    public ChatCommandConfig Leaderboard { get; set; } = new(true, ["!siralama"]) { CooldownSeconds = 10 };
     public RoundStartReminderConfig RoundStartReminder { get; set; } = new();
     public bool ReplyPrivately { get; set; } = true;
 }
@@ -173,6 +186,7 @@ public sealed class ChatCommandConfig(bool enabled, List<string> aliases)
 {
     public bool Enabled { get; set; } = enabled;
     public List<string> Aliases { get; set; } = aliases;
+    public int CooldownSeconds { get; set; }
 }
 
 public sealed class RoundStartReminderConfig

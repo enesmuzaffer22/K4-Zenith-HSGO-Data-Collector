@@ -113,7 +113,14 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
 
         const string rankSql = """
             SELECT
-              1 + SUM(CASE WHEN h.hsr>@hsr OR (h.hsr=@hsr AND h.steam_id64<@steam) THEN 1 ELSE 0 END),
+              CASE WHEN EXISTS (
+                SELECT 1 FROM hsgo_season_leaderboard_blacklist own_b
+                WHERE own_b.server_id=@server AND own_b.steam_id64=@steam
+                  AND @number>=own_b.effective_from_season_number
+                  AND (own_b.effective_until_season_number IS NULL OR @number<own_b.effective_until_season_number)
+              ) THEN NULL ELSE
+                1 + SUM(CASE WHEN h.hsr>@hsr OR (h.hsr=@hsr AND h.steam_id64<@steam) THEN 1 ELSE 0 END)
+              END,
               COUNT(*)
             FROM hsgo_player_season_hsr h
             WHERE h.season_id=@season AND h.server_id=@server
@@ -133,6 +140,161 @@ public sealed class WeeklyMissionRepository(MySqlStore store, HsGoStatsRuntimeSe
         await rankReader.ReadAsync(token);
         return new(season.Name, season.Number, season.StartsAtUtc, season.EndsAtUtc, globalTp, seasonTp,
             rankReader.IsDBNull(0) ? null : Convert.ToInt64(rankReader.GetValue(0)), Convert.ToInt64(rankReader.GetValue(1)));
+    }
+
+    public async Task<long> GetGlobalTpAsync(ulong steamId, CancellationToken token)
+    {
+        await using var connection = store.CreateConnection();
+        await connection.OpenAsync(token);
+        await MySqlStore.SetUtcSessionAsync(connection, token);
+        await using var command = new MySqlCommand(
+            "SELECT hsr FROM hsgo_player_global_hsr WHERE server_id=@server AND steam_id64=@steam", connection);
+        command.Parameters.AddWithValue("@server", serverId);
+        command.Parameters.AddWithValue("@steam", steamId);
+        var value = await command.ExecuteScalarAsync(token);
+        return value is null ? config.Rating.StartingXP : Convert.ToInt64(value);
+    }
+
+    public async Task<IReadOnlyList<ScoreboardTpSnapshot>> GetScoreboardTpAsync(
+        IReadOnlyCollection<ulong> steamIds, StoredSeason? activeSeason, CancellationToken token)
+    {
+        if (steamIds.Count == 0) return [];
+        var result = steamIds.Distinct().ToDictionary(
+            steamId => steamId,
+            steamId => new ScoreboardTpSnapshot(steamId, config.Rating.StartingXP, null));
+
+        await using var connection = store.CreateConnection();
+        await connection.OpenAsync(token);
+        await MySqlStore.SetUtcSessionAsync(connection, token);
+        var parameters = steamIds.Distinct().Select((_, index) => $"@steam{index}").ToArray();
+        var inClause = string.Join(",", parameters);
+
+        await using (var command = new MySqlCommand(
+            $"SELECT steam_id64,hsr FROM hsgo_player_global_hsr WHERE server_id=@server AND steam_id64 IN ({inClause})", connection))
+        {
+            command.Parameters.AddWithValue("@server", serverId);
+            AddSteamIdParameters(command, steamIds);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                var steamId = Convert.ToUInt64(reader.GetValue(0));
+                if (result.TryGetValue(steamId, out var current))
+                    result[steamId] = current with { GlobalTp = reader.GetInt64(1) };
+            }
+        }
+
+        if (activeSeason is not null)
+        {
+            await using var command = new MySqlCommand(
+                $"SELECT steam_id64,hsr FROM hsgo_player_season_hsr WHERE season_id=@season AND server_id=@server AND steam_id64 IN ({inClause})", connection);
+            command.Parameters.AddWithValue("@season", activeSeason.Id);
+            command.Parameters.AddWithValue("@server", serverId);
+            AddSteamIdParameters(command, steamIds);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token))
+            {
+                var steamId = Convert.ToUInt64(reader.GetValue(0));
+                if (result.TryGetValue(steamId, out var current))
+                    result[steamId] = current with { SeasonTp = reader.GetInt64(1) };
+            }
+        }
+
+        return result.Values.ToArray();
+    }
+
+    public async Task<LeaderboardCommandView> GetLeaderboardAsync(
+        StoredSeason? activeSeason, ulong playerSteamId, int limit, CancellationToken token)
+    {
+        await using var connection = store.CreateConnection();
+        await connection.OpenAsync(token);
+        await MySqlStore.SetUtcSessionAsync(connection, token);
+        var global = await LoadLeaderboardScopeAsync(connection, null, playerSteamId, limit, token);
+        var season = activeSeason is null
+            ? null
+            : await LoadLeaderboardScopeAsync(connection, activeSeason, playerSteamId, limit, token);
+        return new(global, activeSeason?.Name, season);
+    }
+
+    private async Task<LeaderboardScopeView> LoadLeaderboardScopeAsync(
+        MySqlConnection connection, StoredSeason? season, ulong playerSteamId, int limit, CancellationToken token)
+    {
+        var seasonal = season is not null;
+        var table = seasonal ? "hsgo_player_season_hsr" : "hsgo_player_global_hsr";
+        var scope = seasonal ? "h.season_id=@season AND h.server_id=@server" : "h.server_id=@server";
+        var blacklist = seasonal
+            ? """
+                AND NOT EXISTS (
+                  SELECT 1 FROM hsgo_season_leaderboard_blacklist b
+                  WHERE b.server_id=h.server_id AND b.steam_id64=h.steam_id64
+                    AND @number>=b.effective_from_season_number
+                    AND (b.effective_until_season_number IS NULL OR @number<b.effective_until_season_number))
+                """
+            : string.Empty;
+        var entries = new List<LeaderboardEntry>(limit);
+        var topSql = $"""
+            SELECT h.steam_id64,COALESCE(NULLIF(p.last_name,''),CAST(h.steam_id64 AS CHAR)),h.hsr
+            FROM {table} h
+            LEFT JOIN hsgo_players p ON p.steam_id64=h.steam_id64
+            WHERE {scope} {blacklist}
+            ORDER BY h.hsr DESC,h.steam_id64 ASC
+            LIMIT @limit
+            """;
+        await using (var command = new MySqlCommand(topSql, connection))
+        {
+            AddLeaderboardParameters(command, season, playerSteamId, limit);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            long rank = 1;
+            while (await reader.ReadAsync(token))
+                entries.Add(new(rank++, Convert.ToUInt64(reader.GetValue(0)), reader.GetString(1), reader.GetInt64(2)));
+        }
+
+        var summarySql = $"""
+            SELECT COUNT(*),MAX(CASE WHEN h.steam_id64=@steam THEN h.hsr END)
+            FROM {table} h
+            WHERE {scope} {blacklist}
+            """;
+        long rankedPlayers;
+        long? playerTp;
+        await using (var command = new MySqlCommand(summarySql, connection))
+        {
+            AddLeaderboardParameters(command, season, playerSteamId, limit);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            await reader.ReadAsync(token);
+            rankedPlayers = Convert.ToInt64(reader.GetValue(0));
+            playerTp = reader.IsDBNull(1) ? null : reader.GetInt64(1);
+        }
+
+        long? playerRank = null;
+        if (playerTp is not null)
+        {
+            var rankSql = $"""
+                SELECT 1+COUNT(*) FROM {table} h
+                WHERE {scope} {blacklist}
+                  AND (h.hsr>@playerTp OR (h.hsr=@playerTp AND h.steam_id64<@steam))
+                """;
+            await using var command = new MySqlCommand(rankSql, connection);
+            AddLeaderboardParameters(command, season, playerSteamId, limit);
+            command.Parameters.AddWithValue("@playerTp", playerTp.Value);
+            playerRank = Convert.ToInt64(await command.ExecuteScalarAsync(token));
+        }
+
+        return new(entries, rankedPlayers, playerRank, playerTp);
+    }
+
+    private static void AddSteamIdParameters(MySqlCommand command, IEnumerable<ulong> steamIds)
+    {
+        var index = 0;
+        foreach (var steamId in steamIds.Distinct()) command.Parameters.AddWithValue($"@steam{index++}", steamId);
+    }
+
+    private void AddLeaderboardParameters(MySqlCommand command, StoredSeason? season, ulong playerSteamId, int limit)
+    {
+        command.Parameters.AddWithValue("@server", serverId);
+        command.Parameters.AddWithValue("@steam", playerSteamId);
+        command.Parameters.AddWithValue("@limit", limit);
+        if (season is null) return;
+        command.Parameters.AddWithValue("@season", season.Id);
+        command.Parameters.AddWithValue("@number", season.Number);
     }
 
     private async Task ApplyProgressAsync(MySqlConnection connection, MySqlTransaction transaction, long windowId, MissionSignal signal, CancellationToken token)

@@ -45,3 +45,9 @@ public sealed record TrackingTargets(bool ApplyGlobal, bool ApplySeason)
         return preseasonTracking ? new(true, false) : new(false, false);
     }
 }
+
+public static class PointAwardEligibility
+{
+    public static bool HasOpposingPlayers(int terroristPlayers, int counterTerroristPlayers) =>
+        terroristPlayers > 0 && counterTerroristPlayers > 0;
+}

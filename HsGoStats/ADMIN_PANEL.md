@@ -20,6 +20,12 @@ WHERE server_id=:server_id
 
 Etkilenen satır sayısı sıfırsa kayıt başka bir admin tarafından değiştirilmiş, JSON geçersiz veya anahtar bulunamamıştır. Panel güncel satırı yeniden okuyup kullanıcıya çakışma göstermelidir. `Database` parolası bu tabloya veya web istemcisine taşınmamalıdır.
 
+## Rank ve scoreboard alanları
+
+`rating` editörü artık on tier ile iç içe `scoreboard` nesnesini korumalıdır. Panel bilinmeyen JSON alanlarını silmemeli; özellikle `scoreboard.enabled`, `skillGroupBaseId`, `refreshSeconds`, `useActiveSeason` ve `fallbackToGlobal` alanlarını round-trip etmelidir. `chat_commands` editörü de `leaderboard` komutunun `enabled`, `aliases` ve `cooldownSeconds` alanlarını korumalıdır.
+
+Web formunda bu alanlar henüz yoksa 1.5.0 migration SQL'inden sonra ham JSON'u eski form modeliyle yeniden kaydetmeyin; eski form yeni alanları düşürebilir. Form güncellenene kadar bu iki setting satırını salt okunur göstermek veya bilinmeyen alanları koruyan merge kullanmak güvenlidir.
+
 ## Son 24 saat aktivitesi
 
 `hsgo_player_sessions` her bağlantı için başlangıç, son heartbeat, kapanış ve süreyi tutar. `sql/example_queries.sql` tek sorguda şunları döndürür:

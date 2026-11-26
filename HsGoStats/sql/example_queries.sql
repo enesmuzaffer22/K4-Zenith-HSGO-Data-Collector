@@ -18,8 +18,18 @@ SELECT h.steam_id64,h.hsr,
   (SELECT t.color FROM hsgo_rating_tiers t WHERE t.server_id=h.server_id AND t.enabled=1 AND t.min_xp<=h.hsr ORDER BY t.min_xp DESC LIMIT 1) AS tier_color
 FROM hsgo_player_global_hsr h WHERE h.server_id=:server_id AND h.steam_id64=:steam_id64;
 
+-- General TP top 10 with dynamic tier metadata. Do not hard-code tier names in the website.
+SELECT h.steam_id64,COALESCE(NULLIF(p.last_name,''),CAST(h.steam_id64 AS CHAR)) AS player_name,h.hsr,
+  (SELECT t.name FROM hsgo_rating_tiers t WHERE t.server_id=h.server_id AND t.enabled=1 AND t.min_xp<=h.hsr ORDER BY t.min_xp DESC LIMIT 1) AS tier_name,
+  (SELECT t.color FROM hsgo_rating_tiers t WHERE t.server_id=h.server_id AND t.enabled=1 AND t.min_xp<=h.hsr ORDER BY t.min_xp DESC LIMIT 1) AS tier_color
+FROM hsgo_player_global_hsr h LEFT JOIN hsgo_players p USING(steam_id64)
+WHERE h.server_id=:server_id
+ORDER BY h.hsr DESC,h.steam_id64 ASC LIMIT 10;
+
 -- Active-season HSR leaderboard. The blacklist is effective by season number.
-SELECT h.steam_id64,p.last_name,h.hsr
+SELECT h.steam_id64,COALESCE(NULLIF(p.last_name,''),CAST(h.steam_id64 AS CHAR)) AS player_name,h.hsr,
+  (SELECT t.name FROM hsgo_rating_tiers t WHERE t.server_id=h.server_id AND t.enabled=1 AND t.min_xp<=h.hsr ORDER BY t.min_xp DESC LIMIT 1) AS tier_name,
+  (SELECT t.color FROM hsgo_rating_tiers t WHERE t.server_id=h.server_id AND t.enabled=1 AND t.min_xp<=h.hsr ORDER BY t.min_xp DESC LIMIT 1) AS tier_color
 FROM hsgo_player_season_hsr h JOIN hsgo_players p USING(steam_id64) JOIN hsgo_seasons se ON se.id=h.season_id
 WHERE h.season_id=:season_id AND h.server_id=:server_id
   AND NOT EXISTS (SELECT 1 FROM hsgo_season_leaderboard_blacklist b WHERE b.server_id=h.server_id AND b.steam_id64=h.steam_id64

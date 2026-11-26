@@ -1,10 +1,10 @@
-# HSGo Stats Collector 1.4.1
+# HSGo Stats Collector 1.5.0
 
-Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, TP ve haftalık görev eklentisidir. Zenith, menü, admin, rank veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. HUD, clan tag, skor tablosu, skin, ConVar veya ban enforcement eklemez.
+Tek `BasePlugin` girişli bağımsız CounterStrikeSharp istatistik, TP, rank ve haftalık görev eklentisidir. Zenith, menü, admin, LevelRanks veya başka bir oyun eklentisine ihtiyaç duymaz; yalnız CounterStrikeSharp ve paket içindeki `MySqlConnector` kullanılır. Native skor tablosunda HSGo rank ikonlarını gösterebilir; clan tag, skin, ConVar veya ban enforcement eklemez.
 
 ## Uyumluluk
 
-Bu sürüm 24 Kasım 2026 tarihinde CounterStrikeSharp API `1.0.379` ve `.NET 10` ile derlenmiştir (`MinimumApiVersion(379)`). Prooyun sunucusundaki gerçek CounterStrikeSharp sürümü görülmediği için kurulumdan önce `css_plugins list`/sunucu konsolu ile en az 1.0.379 ve .NET 10 runtime doğrulanmalıdır. Daha eski bir sunucu için API hedefi bilinçsizce düşürülmemelidir.
+Bu sürüm 26 Kasım 2026 tarihinde CounterStrikeSharp API `1.0.379` ve `.NET 10` ile derlenmiştir (`MinimumApiVersion(379)`). Prooyun sunucusundaki gerçek CounterStrikeSharp sürümü görülmediği için kurulumdan önce `css_plugins list`/sunucu konsolu ile en az 1.0.379 ve .NET 10 runtime doğrulanmalıdır. Daha eski bir sunucu için API hedefi bilinçsizce düşürülmemelidir.
 
 ## Kurulum
 
@@ -32,12 +32,16 @@ Release çıktısı `src/bin/Release/net10.0` altındadır. Paket yeniden üretm
 
 - Kill/death/assist/headshot, gerçek oyuncu hasarı, round, skor, playtime, harita ve silah sayaçları.
 - Genel ve sezonluk satırlar aynı idempotent transaction içinde ayrı artırılır.
-- Oyun aksiyonları ve görevlerle ilerleyen ayrı genel/sezon TP bakiyeleri, sekiz config kontrollü tier ve renk.
+- Oyun aksiyonları ve görevlerle ilerleyen ayrı genel/sezon TP bakiyeleri ve config kontrollü tier renkleri.
+- Recruit, Soldier, Trooper, Veteran, Warrior, Warlord, Phantom, Supreme, Conquer ve Immortal olmak üzere on config kontrollü seviye.
+- TAB rank ikonu aktif sezonda sezon TP'sini, sezon dışında genel TP'yi kullanır; özel SVG addon kaynağı `scoreboard-addon/` altındadır.
+- TP ve haftalık görev ilerlemesi için T ve CT takımlarında en az birer gerçek insan oyuncu bulunması gerekir; ilk kayıt için verilen başlangıç TP'si bu kontrolden bağımsızdır.
 - Elle adlandırılan, kesin başlangıç/bitiş saatli sezon takvimi; otomatik sezon üretimi yoktur.
 - Sezon, görev, TP, tracking ve diğer çalışma ayarları admin paneline uygun `hsgo_plugin_settings` tablosundan okunur; geçersiz revizyon son geçerli ayarı bozmaz.
 - Europe/Istanbul Pazartesi rotasyonlu, yalnız aktif sezon içinde yaşayan oyuncuya özel dokuz haftalık görev; ilk ve son görev haftası sezon sınırında kırpılır.
 - `hsgo_player_sessions` üzerinden son 24 saat benzersiz oyuncu, başlayan oturum ve ortalama oturum süresi raporu.
 - `!sezon` ve ASCII `!gorevler` komutları ile config kontrollü raund başı hatırlatma.
+- Renkli `!sezon` çıktısı ve genel/aktif sezon ilk 10'u ile oyuncunun iki sırasını gösteren `!siralama` komutu.
 - `Season.LeaderboardBlacklistSteamIds` oyuncuları genel istatistiklerde tutar; aktif/geçmiş sezonu değiştirmeden bir sonraki sezondan itibaren sezonluk hedeflerden çıkarır.
 - Sezon aralarında sezonluk istatistik, HSR ve haftalık görev ilerlemesi yoktur; `PreseasonTracking` açıksa genel istatistik devam eder.
 - `event_id` + `hsgo_ingested_events` tekrar oynatmada çift artırmayı engeller.

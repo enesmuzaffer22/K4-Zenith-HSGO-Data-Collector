@@ -8,7 +8,7 @@ Ana tablolar: oyuncu kimliği (`hsgo_players`), admin panelinin çalışma ayarl
 
 `hsgo_player_sessions` bağlantı başına UUID, SteamID64, başlangıç, dakikalık heartbeat, kapanış ve süre tutar. Open/heartbeat/close olayları oyun thread'ini bekletmeyen dayanıklı kuyruktan yazılır. Temiz disconnect gerçek zamanı kapatır; crash sonrasında açık satır son heartbeat'te kapatılır. Bu nedenle sunucunun kapalı kaldığı süre oyuncu oturumuna eklenmez.
 
-HSR mevcut bağımsız `score` istatistiğini değiştirmez. Genel bakiye `hsgo_player_global_hsr`, sezon bakiyesi `hsgo_player_season_hsr`, web için tier eşikleri ve renkler `hsgo_rating_tiers` içindedir. Negatif XP güncellemeleri SQL transaction'ında minimum değere sıkıştırılır.
+HSR mevcut bağımsız `score` istatistiğini değiştirmez. Genel bakiye `hsgo_player_global_hsr`, sezon bakiyesi `hsgo_player_season_hsr`, web için tier eşikleri ve renkler `hsgo_rating_tiers` içindedir. Negatif XP güncellemeleri SQL transaction'ında minimum değere sıkıştırılır. `!siralama` bu iki bakiye tablosunu `hsgo_players` ile birleştirir; sezon sorguları blacklist dönemlerini dışlar, genel sorgular dışlamaz.
 
 Haftalık pencere `hsgo_weekly_windows`, oyuncuya/kategoriye özgü atama ve ilerleme `hsgo_weekly_assignments`, tekrar oynatma koruması `hsgo_mission_events` tablolarındadır. Her pencere zorunlu `season_id` taşır ve kendi sezonunun `[starts_at_utc, ends_at_utc)` aralığından dışarı çıkamaz. Atama satırı görev tanımını `definition_json` içinde dondurur. Tamamlama işareti, genel HSR ödülü ve aktif sezon HSR ödülü tek transaction'dır.
 
@@ -31,3 +31,5 @@ Manuel sezon takvimi MySQL `GET_LOCK`, unique season number/start ve generated `
 Bakım penceresinde sağlayıcının snapshot özelliğini veya `mysqldump --single-transaction --routines=false --tables hsgo_*` eşdeğerini kullanın. Geri yüklemeden önce plugin'i durdurun, hedef DB'yi ayrıca yedekleyin, yalnız `hsgo_` tablolarını restore edin ve sezonlarda en fazla bir active satır olduğunu doğrulayın. Üretim komutları sağlayıcının onayı olmadan çalıştırılmamalıdır.
 
 `hsgo_ingested_events` büyür. Retention otomatik silinmez; spool'un maksimum yeniden oynatma ufkundan daha eski satırlar ancak yedek ve bakım prosedürüyle arşivlenmelidir.
+
+1.5.0 yeni tablo veya kolon eklemez. Mevcut `rating` ve `chat_commands` setting JSON'ları `sql/migrate_1.5.0_ranks_scoreboard.sql` ile güncellenir; genel/sezon TP satırlarına dokunulmaz.

@@ -69,6 +69,11 @@ public sealed record MissionProgressView(int MissionId, int Category, string Des
 public sealed record SeasonCommandView(string Name, int Number, DateTimeOffset StartsAtUtc, DateTimeOffset EndsAtUtc,
     long GlobalTp, long SeasonTp, long? Rank, long RankedPlayers);
 
+public sealed record LeaderboardEntry(long Rank, ulong SteamId64, string Name, long Tp);
+public sealed record LeaderboardScopeView(IReadOnlyList<LeaderboardEntry> Entries, long RankedPlayers, long? PlayerRank, long? PlayerTp);
+public sealed record LeaderboardCommandView(LeaderboardScopeView Global, string? SeasonName, LeaderboardScopeView? Season);
+public sealed record ScoreboardTpSnapshot(ulong SteamId64, long GlobalTp, long? SeasonTp);
+
 public sealed record MissionProgressDelta(bool Matched, int Amount, bool Replace);
 
 public static class MissionEvaluator

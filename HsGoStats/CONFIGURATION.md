@@ -28,12 +28,20 @@ Plugin revizyonları yaklaşık 30 saniyede bir denetler. Geçerli değişiklikl
 - `season`: `Enabled`, `Timezone`, `PreseasonTracking`, `Schedule` ve leaderboard blacklist içerir. Her sezon `Name`, açık ofsetli `StartsAt` ve `EndsAt` taşır; liste kronolojik ve çakışmasız olmalıdır. Aralık `[StartsAt, EndsAt)` biçimindedir. Tamamlanmış sezonlar aynı sırada tutulmalıdır.
 - `scoring`: legacy score sayaçlarının kill, assist, death, C4 ve raund değerleridir. C4 drop/pickup uygulanmaz.
 - `game_xp`: HSR olay ekonomisidir. Özel kill ödülleri toplanmaz; en yüksek eşleşen değer seçilir.
-- `rating`: minimum HSR, demotion davranışı ve sıralı tier eşikleri/adları/HEX renkleridir.
+- `rating`: minimum HSR, demotion davranışı, sıralı tier eşikleri/adları/HEX renkleri ve native scoreboard ayarlarıdır. `Scoreboard.Enabled`, `SkillGroupBaseId`, `RefreshSeconds`, aktif sezon önceliği ve genel TP fallback davranışı buradan yönetilir.
 - `weekly_missions`: aktif sezonla sınırlı rotasyon, ödül hedefleri, dışlanan silahlar ve 100 görevlik katalogdur. İlk/son görev haftası sezon sınırında kırpılır.
-- `chat_commands`: `!sezon`, `!gorevler`, özel yanıt ve raund başı hatırlatmasıdır.
+- `chat_commands`: `!sezon`, `!gorevler`, `!siralama`, komut cooldown'u, özel yanıt ve raund başı hatırlatmasıdır.
 - `tracking`: istatistik olayları, warmup/bot/team-kill filtreleri ve map/weapon boyutlarıdır.
 - `bans`: yalnız arşiv yetenekleridir; import ve enforcement desteklenmez.
 - `persistence`: bounded queue, batch, retry/backoff ve dayanıklı spool ayarlarıdır.
 - `logging`: log seviyesi ile oyuncu adının saklanıp saklanmayacağını belirler.
 
 Puan katsayısı değişikliği geçmiş skorları yeniden hesaplamaz. Haftalık görev tanımı atama anında dondurulur. Aktif sezonun başlangıcı geriye dönük taşınmaz; tamamlanmış sezonun DB geçmişi korunur.
+
+## 1.5.0 rank ve scoreboard yükseltmesi
+
+Mevcut kurulumda çalışma ayarlarının kaynağı DB olduğu için yalnız DLL güncellemek tier listesini değiştirmez. Önce yedek alın, `sql/migrate_1.5.0_ranks_scoreboard.sql` içindeki `@hsgo_server_id` değerini gerçek `ServerId` ile değiştirin ve SQL'i çalıştırın. Oyuncu TP bakiyeleri değişmez; yalnız `rating` ve `chat_commands` ayar JSON'ları güncellenir.
+
+Scoreboard ikonları için `scoreboard-addon/README.md` akışını izleyin. Plugin `FollowCS2ServerGuidelines` değerini değiştirmez. Native competitive rank alanına yazmak GSLT riski taşır ve sunucu sahibinin açık kararıdır.
+
+TAB açıldığında rankları görünür kılmak için güncel `FakeRanks-RevealAll` Metamod eklentisi ayrıca kurulmalıdır. HsGoStats 1.5.4 ve sonrasında reveal user-message göndermez. HsGoStats 1.5.5, DB'yi daha sık sorgulamadan önbellekteki competitive rank netprop değerlerini her tick doğrular ve yalnız başka bir sistem/oyun motoru alanları değiştirdiğinde yeniden uygular.

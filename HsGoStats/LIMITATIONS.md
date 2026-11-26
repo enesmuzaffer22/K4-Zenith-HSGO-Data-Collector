@@ -15,3 +15,5 @@
 - DB ayarları yaklaşık 30 saniyede yenilenir. Persistence queue/spool kapasitesi ve kaldırılmış eski komut alias'ları tamamen plugin/server reload sonrasında uygulanır.
 - Oturum heartbeat'i dakikada birdir. Ani süreç/host çökmesinde son heartbeat ile gerçek kopma arasındaki en fazla yaklaşık bir dakikalık bölüm kesin değildir; sunucunun kapalı kaldığı süre oturuma eklenmez.
 - Native/başka plugin ban import ve enforcement **NOT SUPPORTED / NOT TESTED**.
+- Native TAB rank alanı gerçek CS2 istemcisi, Workshop/MultiAddonManager dağıtımı ve `FollowCS2ServerGuidelines` davranışıyla staging sunucusunda doğrulanmadı. Native competitive rank alanına yazmak GSLT riski taşır; plugin koruma ayarını otomatik değiştirmez.
+- `!siralama` sorguları derlenmiş ve statik olarak denetlenmiştir; gerçek MySQL/MariaDB üzerinde blacklist, uzun oyuncu adları ve eşit TP yük testi staging ortamı gerektirir.

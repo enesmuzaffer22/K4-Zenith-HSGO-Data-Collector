@@ -1,5 +1,27 @@
 # Test report
 
+## 2026-11-26 — Rank, scoreboard ve sıralama sürümü 1.5.0
+
+| Check | Result |
+|---|---|
+| Release build | PASS — 0 warning, 0 error |
+| Unit tests | PASS — 64/64 |
+| Recruit–Immortal 10 tier sınırları | PASS |
+| Aktif sezonda sezon TP seçimi | PASS |
+| Sezon verisi/yokluğunda genel TP fallback | PASS |
+| Scoreboard config doğrulaması | PASS |
+| `!sezon` ve `!siralama` renkli çıktı yolu | PASS — derleme/statik denetim |
+| Genel ve sezon ilk 10 sorguları | PASS — derleme/statik SQL denetimi |
+| SVG dosya sayısı ve skillgroup eşlemesi | PASS — 10/10 |
+| Panorama SVG sadeleştirme | PASS — 10/10 geçerli XML; SVG 1.1 + doğal 32x13 viewBox; yalnızca doğrudan fill ve mutlak M/L/Z path geometrisi; style/class/defs/group/transform/eğri/arc yok |
+| CS2 `resourcecompiler.exe` doğrulaması | PASS — 10 compiled, 0 failed |
+| 1.5.0 DB setting migration | PASS — statik SQL denetimi |
+| Plugin release archive | `HsGoStats-v1.5.0.zip`, 595051 bytes, SHA-256 `EE4F84132EA9E5FD0382C111D11D7F84057360ED0AA3622F0D8EDCC3D180B95C` |
+| Rank addon source archive | `HsGoStats-rank-addon-src-v1.5.3.zip`, 28714 bytes, SHA-256 `BCFDB5B909BFA0E8EAEB46EBD767495F4B0BE1985C2AF3B12B65385D605C8E72` |
+| Gerçek CS2 TAB, addon dağıtımı ve MySQL sorguları | NOT TESTED — staging sunucusu/veritabanı gerekli |
+
+Sandbox içindeki iki VSTest denemesi testhost IPC bağlantısında 90/180 saniye zaman aşımına uğradı. Aynı derlenmiş paket izinli sandbox dışı çalıştırmada 64/64 geçti; assertion hatası oluşmadı.
+
 ## 2026-11-24 — DB ayarları ve oturum telemetrisi sürümü 1.3.0
 
 | Check | Result |
@@ -88,3 +110,40 @@ Sandbox içindeki ilk VSTest denemesi testhost IPC kısıtı nedeniyle bağlanam
 | Release archive | `HsGoStats-v1.0.1.zip`, 517400 bytes, SHA-256 `F2F067A4D2D63357EFD4EC5523C081FA7B2F7F0728BDB0D7442E4E5ACC6C3376` | PASS |
 
 İlk test koşusunda test runtime'ında CounterStrikeSharp API kopyası eksik olduğu için 8 PASS / 1 FAIL alındı; test projesine açık runtime referansı eklendi. Gelecek sezon etkinleşen blacklist testleriyle genişletilen son takım 12/12 PASS verdi. Bu geçmiş saklanmıştır; sahte canlı ortam başarısı iddia edilmez.
+
+## 2026-11-26 — Scoreboard rank reveal düzeltmesi 1.5.1
+
+- TAB rank alanlarının mevcut DB yenileme aralığından bağımsız olarak iki saniyede bir görünür tutulması eklendi.
+- Sabit user-message ID `350` yerine `CCSUsrMsg_ServerRankRevealAll` adı kullanılıyor.
+- Reveal mesajı çözümlenemezse istatistik toplama devam eder; hata `revealBlocked` tanısı ve tek log kaydıyla sınırlandırılır.
+- `dotnet build HsGoStats/src/HsGoStats.csproj -c Release --no-restore`: başarılı, 0 uyarı, 0 hata.
+- `dotnet test` derleme ve test-host başlangıcını tamamladı fakat mevcut test çalıştırıcısı keşif sonrasında sonuç üretmeden bekledi; süreç sonlandırıldı.
+
+## 2026-11-26 — TAB basışına bağlı rank reveal düzeltmesi 1.5.2
+
+- 1.5.1'in iki saniyelik global reveal yayını canlı testte ikonun düzenli biçimde görünüp kaybolmasına neden olduğu için kaldırıldı.
+- `OnPlayerButtonsChanged` ile gerçek TAB basışının yükselen kenarı dinleniyor.
+- `CCSUsrMsg_ServerRankRevealAll` yalnız TAB'a basan oyuncuya gönderiliyor; yaklaşım güncel FakeRanks-RevealAll Metamod uygulamasıyla eşleştirildi.
+- Rank henüz oyuncuya uygulanmadıysa TAB basışı anında DB yenilemesi isteniyor ve sonraki TAB açılışında reveal uygulanıyor.
+
+## 2026-11-26 — Gecikmeli TAB reveal düzeltmesi 1.5.3
+
+- Canlı 1.5.2 testinde plugin sürümü ve blok durumları doğru olmasına rağmen reveal mesajının pre-think aşamasında erken gönderildiği gözlendi.
+- TAB basışından 0,2 saniye sonra beklenen skillgroup değerleri yeniden yazılıp `SetStateChanged` ile replikasyona işaretleniyor.
+- Reveal mesajı takip eden frame'de yalnız TAB'a basan oyuncuya gönderiliyor.
+- Rank değişiminde yapılan global reveal kaldırıldı; istemci yalnız gerçek TAB açılışında tetikleniyor.
+
+## 2026-11-26 — Metamod reveal sağlayıcısına geçiş 1.5.4
+
+- Canlı testte CounterStrikeSharp üzerinden gönderilen reveal mesajı doğru zamanda ulaştığı halde ikon istemci tarafından hemen gizlendi.
+- HsGoStats içindeki TAB listener ve user-message gönderimi tamamen kaldırıldı.
+- Plugin yalnız `CompetitiveWins`, `CompetitiveRankType` ve `CompetitiveRanking` alanlarını yönetir.
+- TAB reveal sorumluluğu K4-System-MMRanks'in de önerdiği `FakeRanks-RevealAll` Metamod eklentisine bırakıldı.
+
+## 2026-11-26 — Scoreboard netprop kalıcılığı 1.5.5
+
+- `FakeRanks-RevealAll` yüklüyken ikonun kısa süre görünüp kaybolması reveal katmanını eledi ve competitive rank alanlarının geri sıfırlandığını gösterdi.
+- Aktif oyuncuların beklenen skillgroup değerleri DB yenilemesinden ayrı bir bellek önbelleğinde tutuluyor.
+- Her tick yalnız alanları beklenen değerden farklı olan oyuncular yeniden yazılıyor; tick döngüsünde DB veya başka I/O yapılmıyor.
+- Competitive görünürlük değeri güncel LevelRanksFakeRank ile eşleşecek şekilde `CompetitiveWins=777` olarak ayarlandı.
+- `css_hsgo_status` çıktısına `maintained` ve `repairs` sayaçları eklendi.

@@ -39,12 +39,14 @@ public static class ConfigValidator
         if (rawSeason!.Schedule is null) errors.Add("Season.Schedule cannot be null.");
         if (rawSeason.LeaderboardBlacklistSteamIds is null) errors.Add("Season.LeaderboardBlacklistSteamIds cannot be null.");
         if (rawRating!.Tiers is null) errors.Add("Rating.Tiers cannot be null.");
+        if (rawRating.Scoreboard is null) errors.Add("Rating.Scoreboard cannot be null.");
         if (rawWeekly!.Rotation is null) errors.Add("WeeklyMissions.Rotation cannot be null.");
         if (rawWeekly.Rewards is null) errors.Add("WeeklyMissions.Rewards cannot be null.");
         if (rawWeekly.Catalog is null) errors.Add("WeeklyMissions.Catalog cannot be null.");
         if (rawWeekly.ExcludedMissionWeapons is null) errors.Add("WeeklyMissions.ExcludedMissionWeapons cannot be null.");
         if (rawChat!.Season is null || rawChat.Season.Aliases is null) errors.Add("ChatCommands.Season and its aliases cannot be null.");
         if (rawChat.Missions is null || rawChat.Missions.Aliases is null) errors.Add("ChatCommands.Missions and its aliases cannot be null.");
+        if (rawChat.Leaderboard is null || rawChat.Leaderboard.Aliases is null) errors.Add("ChatCommands.Leaderboard and its aliases cannot be null.");
         if (rawChat.RoundStartReminder is null) errors.Add("ChatCommands.RoundStartReminder cannot be null.");
         if (errors.Count > bootstrapValidation.Errors.Count) return new(errors, warnings);
 
@@ -60,11 +62,13 @@ public static class ConfigValidator
         var seasonSchedule = seasonConfig.Schedule!;
         var seasonBlacklist = seasonConfig.LeaderboardBlacklistSteamIds!;
         var tiers = rating.Tiers!;
+        var scoreboard = rating.Scoreboard!;
         var rotation = weekly.Rotation!;
         var catalog = weekly.Catalog!;
         var excludedWeapons = weekly.ExcludedMissionWeapons!;
         var seasonAliases = chat.Season!.Aliases!;
         var missionAliases = chat.Missions!.Aliases!;
+        var leaderboardAliases = chat.Leaderboard!.Aliases!;
 
         try { _ = TimeZoneInfo.FindSystemTimeZoneById(seasonConfig.Timezone); }
         catch { errors.Add($"Season.Timezone '{seasonConfig.Timezone}' is not available on this host."); }
@@ -108,12 +112,18 @@ public static class ConfigValidator
 
         if (rating.MinimumXP < 0) errors.Add("Rating.MinimumXP cannot be negative.");
         if (rating.StartingXP < rating.MinimumXP) errors.Add("Rating.StartingXP cannot be lower than Rating.MinimumXP.");
+        if (scoreboard.SkillGroupBaseId <= 18) errors.Add("Rating.Scoreboard.SkillGroupBaseId must be greater than 18 to avoid built-in skill groups.");
+        if ((long)scoreboard.SkillGroupBaseId + Math.Max(0, tiers.Count - 1) > int.MaxValue)
+            errors.Add("Rating.Scoreboard skill-group range exceeds Int32.");
+        if (scoreboard.RefreshSeconds is < 2 or > 60) errors.Add("Rating.Scoreboard.RefreshSeconds must be between 2 and 60.");
         if (tiers.Count == 0) errors.Add("Rating.Tiers must contain at least one tier.");
         else
         {
             var ordered = tiers.OrderBy(x => x.MinXP).ToArray();
             if (ordered[0].MinXP != rating.MinimumXP) errors.Add("The first rating tier must start at Rating.MinimumXP.");
             if (ordered.Select(x => x.Id).Distinct().Count() != ordered.Length) errors.Add("Rating tier IDs must be unique.");
+            if (!ordered.Select(x => x.Id).SequenceEqual(Enumerable.Range(1, ordered.Length)))
+                errors.Add("Rating tier IDs must be contiguous and start at 1 for scoreboard icon mapping.");
             if (ordered.Select(x => x.MinXP).Distinct().Count() != ordered.Length) errors.Add("Rating tier thresholds must be unique.");
             if (!ordered.SequenceEqual(tiers)) errors.Add("Rating tiers must be sorted by MinXP.");
             foreach (var tier in ordered)
@@ -153,6 +163,9 @@ public static class ConfigValidator
 
         ValidateAliases(seasonAliases, "ChatCommands.Season", errors);
         ValidateAliases(missionAliases, "ChatCommands.Missions", errors);
+        ValidateAliases(leaderboardAliases, "ChatCommands.Leaderboard", errors);
+        if (chat.Leaderboard.CooldownSeconds is < 0 or > 300)
+            errors.Add("ChatCommands.Leaderboard.CooldownSeconds must be between 0 and 300.");
 
         if (bans.AutoImportFromExistingAdminPlugin) errors.Add("Bans.AutoImportFromExistingAdminPlugin is not supported in 1.0.0.");
         if (bans.TrackNativeBanEventsIfVerified) errors.Add("Bans.TrackNativeBanEventsIfVerified is not supported in 1.0.0.");

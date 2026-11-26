@@ -42,6 +42,15 @@ public static class RatingResolver
     }
 }
 
+public static class ScoreboardRatingSelector
+{
+    public static long? SelectTp(ScoreboardTpSnapshot snapshot, bool seasonActive, ScoreboardRankConfig config)
+    {
+        if (config.UseActiveSeason && seasonActive && snapshot.SeasonTp is not null) return snapshot.SeasonTp;
+        return config.FallbackToGlobal || !seasonActive || !config.UseActiveSeason ? snapshot.GlobalTp : null;
+    }
+}
+
 public static class WeaponRules
 {
     public static bool IsKnife(string? weapon) => weapon is not null &&

@@ -12,11 +12,11 @@ using Microsoft.Extensions.Logging;
 namespace HsGoStats;
 
 [MinimumApiVersion(379)]
-public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
+public sealed partial class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
 {
     public override string ModuleName => "HSGo Stats Collector";
     public override string ModuleAuthor => "HSGo / K4-Zenith contributors";
-    public override string ModuleVersion => "1.4.1";
+    public override string ModuleVersion => "1.5.5";
     public override string ModuleDescription => "Standalone TP, weekly mission, season and MySQL statistics collector.";
 
     public HsGoStatsConfig Config { get; set; } = new();
@@ -58,6 +58,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     private long _observeRejectedNotReady;
     private long _observeRejectedDisabled;
     private long _observeRejectedWarmup;
+    private long _pointSignalsRejectedTeams;
 
     public void OnConfigParsed(HsGoStatsConfig config)
     {
@@ -94,12 +95,14 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         RegisterEventHandler<EventPlayerBlind>(OnPlayerBlind, HookMode.Post);
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterListener<Listeners.OnMapEnd>(OnMapEnd);
+        RegisterListener<Listeners.OnTick>(MaintainScoreboardRanks);
 
         _lifetime = new CancellationTokenSource();
         _store = new MySqlStore(Config);
         _settingsRepository = new PluginSettingsRepository(_store, Config);
 
         AddTimer(10.0f, TickPlaytime, TimerFlags.REPEAT);
+        AddTimer(1.0f, () => RequestScoreboardRefresh(), TimerFlags.REPEAT);
         AddTimer(30.0f, RequestSeasonRefresh, TimerFlags.REPEAT);
         _ = Task.Run(() => InitializeAsync(_lifetime.Token));
 
@@ -116,6 +119,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         foreach (var session in _playSessions.Values)
             if (session.DatabaseOpened) EnqueueSession(session, PlayerSessionSignalType.Close, now);
         _ready = false;
+        ClearAppliedScoreboardRanks();
         _pipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
         _missionPipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
         _sessionPipeline?.StopAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
@@ -193,6 +197,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                         EnsurePlaySession(player, observed);
                         EnqueueMission(identity, "Ensure", at: observed);
                     }
+                RequestScoreboardRefresh(immediate: true);
             });
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -219,6 +224,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                     Volatile.Read(ref _configuredSeasonLeaderboardBlacklist), effectiveFrom, _lifetime.Token);
                 _seasonLeaderboardBlacklistState.Replace(blacklistRules);
                 foreach (var warning in result.Warnings) Logger.LogWarning("HSGo season: {Warning}", warning);
+                Server.NextFrame(() => RequestScoreboardRefresh(immediate: true));
             }
             catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
             catch (Exception ex) { Logger.LogError(ex, "HSGo season refresh failed; the last immutable season snapshot remains in use."); }
@@ -263,6 +269,8 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         Server.NextFrame(RegisterConfiguredCommands);
         _settingsRevision = loaded.Revision;
         _rejectedSettingsRevision = 0;
+        _scoreboardBlocked = false;
+        _nextScoreboardRefresh = DateTimeOffset.MinValue;
         foreach (var warning in validation.Warnings) Logger.LogWarning("HSGo database config revision {Revision}: {Warning}", loaded.Revision, warning);
         if (persistenceChanged) Logger.LogWarning("Persistence settings changed in the database and will take effect after a plugin/server reload; other revision {Revision} settings are active.", loaded.Revision);
         Logger.LogInformation("Applied HSGo database config revision token {Revision}.", loaded.Revision);
@@ -298,6 +306,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         Interlocked.Increment(ref _connectCallbacks);
         EnsurePlaySession(@event.Userid, DateTimeOffset.UtcNow);
         if (TryIdentity(@event.Userid, out var identity)) EnqueueMission(identity, "Ensure");
+        RequestScoreboardRefresh(immediate: true);
         return HookResult.Continue;
     }
 
@@ -312,6 +321,9 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                 _playSessions[steamId] = session;
         }
         _roundParticipants.Remove(steamId);
+        _leaderboardCooldowns.Remove(steamId);
+        _scoreboardApplied.Remove(steamId);
+        _scoreboardSkillGroups.Remove(steamId);
         return HookResult.Continue;
     }
 
@@ -653,8 +665,27 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
     private void EnqueueMission(MissionSignal signal)
     {
         if (!_ready || (!_settings.WeeklyMissions.Enabled && !_settings.Rating.Enabled) || _missionPipeline is null) return;
+        if (!string.Equals(signal.Event, "Ensure", StringComparison.Ordinal) && !HasOpposingHumanPlayers())
+        {
+            Interlocked.Increment(ref _pointSignalsRejectedTeams);
+            return;
+        }
         if (!_settings.WeeklyMissions.Enabled && signal.HsrDelta == 0) return;
         if (!_missionPipeline.TryEnqueue(signal)) Logger.LogError("Weekly mission queue is full; event {EventId} was dropped.", signal.EventId);
+    }
+
+    private bool HasOpposingHumanPlayers()
+    {
+        var terroristPlayers = 0;
+        var counterTerroristPlayers = 0;
+        foreach (var player in Utilities.GetPlayers())
+        {
+            if (player is not { IsValid: true } || player.IsBot || player.IsHLTV || player.SteamID == 0) continue;
+            if (player.Team == CsTeam.Terrorist) terroristPlayers++;
+            if (player.Team == CsTeam.CounterTerrorist) counterTerroristPlayers++;
+            if (PointAwardEligibility.HasOpposingPlayers(terroristPlayers, counterTerroristPlayers)) return true;
+        }
+        return false;
     }
 
     private StoredSeason? ActiveSeason(DateTimeOffset at) => _settings.Season.Enabled ? _seasonState.ActiveAt(at) : null;
@@ -684,6 +715,8 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         info.ReplyToCommand($"[HsGo] players total={players.Length} humans={humans} bots={bots} steamReady={steamReady} playing={playing} eligible={eligible} eligiblePlaying={eligiblePlaying} trackedSessions={_playSessions.Count}");
         info.ReplyToCommand($"[HsGo] callbacks connect={Interlocked.Read(ref _connectCallbacks)} roundStart={Interlocked.Read(ref _roundStartCallbacks)} roundEnd={Interlocked.Read(ref _roundEndCallbacks)} death={Interlocked.Read(ref _deathCallbacks)} hurt={Interlocked.Read(ref _hurtCallbacks)} playtimeTicks={Interlocked.Read(ref _playtimeTicks)}");
         info.ReplyToCommand($"[HsGo] observe checks={Interlocked.Read(ref _observeChecks)} rejectedNotReady={Interlocked.Read(ref _observeRejectedNotReady)} rejectedDisabled={Interlocked.Read(ref _observeRejectedDisabled)} rejectedWarmup={Interlocked.Read(ref _observeRejectedWarmup)}");
+        info.ReplyToCommand($"[HsGo] tpTeamGate={HasOpposingHumanPlayers()} rejectedPointSignals={Interlocked.Read(ref _pointSignalsRejectedTeams)}");
+        info.ReplyToCommand($"[HsGo] scoreboard enabled={_settings.Rating.Enabled && _settings.Rating.Scoreboard.Enabled} applied={_scoreboardApplied.Count} maintained={_scoreboardSkillGroups.Count} repairs={Interlocked.Read(ref _scoreboardRepairs)} blocked={_scoreboardBlocked} baseSkillGroup={_settings.Rating.Scoreboard.SkillGroupBaseId} revealProvider=FakeRanks-RevealAll");
         info.ReplyToCommand(_pipeline is null
             ? "[HsGo] statsPipeline=not-created"
             : $"[HsGo] statsPipeline={WorkerState(_pipeline.IsRunning, _pipeline.LastFailure)} enqueued={_pipeline.EnqueuedEvents} persisted={_pipeline.PersistedEvents} dropped={_pipeline.DroppedEvents}");
@@ -706,6 +739,7 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         if (_settings.ChatCommands.Missions.Enabled)
             foreach (var alias in _settings.ChatCommands.Missions.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
                 if (_registeredMissionCommands.Add(alias)) AddCommand(alias, "Haftalık görevleri gösterir", OnMissionsCommand);
+        RegisterLeaderboardCommands();
     }
 
     private void OnMissionsCommand(CCSPlayerController? player, CommandInfo info)
@@ -775,7 +809,35 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
         if (season is null)
         {
             var next = _seasonState.NextAfter(now);
-            CommandReply(player!, next is null ? "[HsGo] Aktif sezon yok." : $"[HsGo] Aktif sezon yok. Sonraki sezon: {next.Name} | Başlangıç: {FormatSeasonDate(next.StartsAtUtc)}");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _missionRepository.ProcessAsync(new MissionSignal(Guid.NewGuid(), now, identity, "Ensure",
+                        null, false, false), _lifetime.Token);
+                    var globalTp = await _missionRepository.GetGlobalTpAsync(identity.SteamId64, _lifetime.Token);
+                    Server.NextFrame(() =>
+                    {
+                        if (player is null || !player.IsValid) return;
+                        var rating = RatingResolver.Resolve(globalTp, _settings.Rating);
+                        CommandReply(player, $"{HsGoPrefix()}{ChatColors.Grey}Şu anda aktif sezon yok.{ChatColors.Default}");
+                        CommandReply(player, $"{ChatColors.Gold}Genel TP:{ChatColors.Default} {ChatColors.Green}{globalTp:N0} TP{ChatColors.Default} — {TierLabel(rating.Tier)}");
+                        if (rating.NextTier is not null)
+                            CommandReply(player, $"{ChatColors.Gold}Sonraki seviye:{ChatColors.Default} {TierLabel(rating.NextTier)} — {ChatColors.Green}{rating.XpToNext:N0} TP{ChatColors.Default} kaldı");
+                        if (next is not null)
+                        {
+                            CommandReply(player, $"{ChatColors.Gold}Sonraki sezon:{ChatColors.Default} {next.Name}");
+                            CommandReply(player, $"{ChatColors.Gold}Başlangıç:{ChatColors.Default} {FormatSeasonDate(next.StartsAtUtc)}");
+                        }
+                    });
+                }
+                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Off-season command failed for {SteamId}", identity.SteamId64);
+                    Server.NextFrame(() => { if (player is not null && player.IsValid) CommandReply(player, $"{HsGoPrefix()}{ChatColors.LightRed}Sezon bilgisi şu anda yüklenemedi; lütfen tekrar deneyin.{ChatColors.Default}"); });
+                }
+            });
             return;
         }
         _ = Task.Run(async () =>
@@ -789,11 +851,18 @@ public sealed class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStatsConfig>
                 Server.NextFrame(() =>
                 {
                     if (player is null || !player.IsValid || view is null) return;
-                    var rating = RatingResolver.Resolve(view.SeasonTp, _settings.Rating);
-                    var rank = view.Rank is null ? "Henüz sıralamada değilsin" : $"Sıralama: #{view.Rank}/{view.RankedPlayers}";
-                    CommandReply(player, $"[HsGo] {view.Name} | Genel TP: {view.GlobalTp:N0} | Sezon TP: {view.SeasonTp:N0} ({rating.Tier.Name})");
-                    CommandReply(player, $"[HsGo] {rank} | Kalan: {FormatRemaining(view.EndsAtUtc - DateTimeOffset.UtcNow)}");
-                    CommandReply(player, $"[HsGo] Başlangıç: {FormatSeasonDate(view.StartsAtUtc)} | Bitiş: {FormatSeasonDate(view.EndsAtUtc)}");
+                    var globalRating = RatingResolver.Resolve(view.GlobalTp, _settings.Rating);
+                    var seasonRating = RatingResolver.Resolve(view.SeasonTp, _settings.Rating);
+                    CommandReply(player, $"{HsGoPrefix()}{ChatColors.Gold}{view.Name}{ChatColors.Default}");
+                    CommandReply(player, $"{ChatColors.Gold}Genel TP:{ChatColors.Default} {ChatColors.Green}{view.GlobalTp:N0} TP{ChatColors.Default} — {TierLabel(globalRating.Tier)}");
+                    CommandReply(player, $"{ChatColors.Gold}Sezon TP:{ChatColors.Default} {ChatColors.Green}{view.SeasonTp:N0} TP{ChatColors.Default} — {TierLabel(seasonRating.Tier)}");
+                    CommandReply(player, view.Rank is null
+                        ? $"{ChatColors.Gold}Sezon sıralaması:{ChatColors.Default} {ChatColors.Grey}Henüz sıralamada değilsin.{ChatColors.Default}"
+                        : $"{ChatColors.Gold}Sezon sıralaması:{ChatColors.Default} {ChatColors.Silver}#{view.Rank}/{view.RankedPlayers}{ChatColors.Default}");
+                    if (seasonRating.NextTier is not null)
+                        CommandReply(player, $"{ChatColors.Gold}Sonraki seviye:{ChatColors.Default} {TierLabel(seasonRating.NextTier)} — {ChatColors.Green}{seasonRating.XpToNext:N0} TP{ChatColors.Default} kaldı");
+                    CommandReply(player, $"{ChatColors.Gold}Kalan:{ChatColors.Default} {FormatRemaining(view.EndsAtUtc - DateTimeOffset.UtcNow)}");
+                    CommandReply(player, $"{ChatColors.Gold}Başlangıç:{ChatColors.Default} {FormatSeasonDate(view.StartsAtUtc)} | {ChatColors.Gold}Bitiş:{ChatColors.Default} {FormatSeasonDate(view.EndsAtUtc)}");
                 });
             }
             catch (Exception ex)

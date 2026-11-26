@@ -29,6 +29,17 @@ public sealed class DomainTests
         Assert.False(actual.ApplySeason);
     }
 
+    [Theory]
+    [InlineData(0, 0, false)]
+    [InlineData(1, 0, false)]
+    [InlineData(0, 1, false)]
+    [InlineData(1, 1, true)]
+    [InlineData(4, 5, true)]
+    public void PointsRequireAtLeastOnePlayerOnEachTeam(int terroristPlayers, int counterTerroristPlayers, bool expected)
+    {
+        Assert.Equal(expected, PointAwardEligibility.HasOpposingPlayers(terroristPlayers, counterTerroristPlayers));
+    }
+
     [Fact]
     public void InvalidSeasonBlacklistSteamIdIsRejected()
     {
@@ -219,15 +230,27 @@ public sealed class DomainTests
     }
 
     [Theory]
-    [InlineData(0, "Iron")]
-    [InlineData(-50, "Iron")]
-    [InlineData(999, "Iron")]
-    [InlineData(1000, "Bronze")]
-    [InlineData(2999, "Bronze")]
-    [InlineData(3000, "Silver")]
-    [InlineData(59999, "Master")]
-    [InlineData(60000, "Legend")]
-    [InlineData(90000, "Legend")]
+    [InlineData(0, "Recruit")]
+    [InlineData(-50, "Recruit")]
+    [InlineData(999, "Recruit")]
+    [InlineData(1000, "Soldier")]
+    [InlineData(2999, "Soldier")]
+    [InlineData(3000, "Trooper")]
+    [InlineData(5999, "Trooper")]
+    [InlineData(6000, "Veteran")]
+    [InlineData(9999, "Veteran")]
+    [InlineData(10000, "Warrior")]
+    [InlineData(14999, "Warrior")]
+    [InlineData(15000, "Warlord")]
+    [InlineData(22499, "Warlord")]
+    [InlineData(22500, "Phantom")]
+    [InlineData(32499, "Phantom")]
+    [InlineData(32500, "Supreme")]
+    [InlineData(44999, "Supreme")]
+    [InlineData(45000, "Conquer")]
+    [InlineData(59999, "Conquer")]
+    [InlineData(60000, "Immortal")]
+    [InlineData(90000, "Immortal")]
     public void RatingBoundariesResolveCorrectly(long xp, string expected)
     {
         Assert.Equal(expected, RatingResolver.Resolve(xp, new RatingConfig()).Tier.Name);
@@ -240,6 +263,48 @@ public sealed class DomainTests
         Assert.Equal(25, policy.Kill("awp", headshot: true, noScope: true, throughSmoke: true, penetrated: true, attackerBlind: true, attackerInAir: true));
         Assert.Equal(20, policy.Kill("knife", headshot: true, noScope: false, throughSmoke: false, penetrated: false, attackerBlind: false, attackerInAir: false));
         Assert.Equal(7, policy.Kill("ak47", headshot: true, noScope: false, throughSmoke: false, penetrated: false, attackerBlind: false, attackerInAir: false));
+    }
+
+    [Fact]
+    public void ScoreboardUsesSeasonTpWhenAnActiveSeasonHasAPlayerBalance()
+    {
+        var snapshot = new ScoreboardTpSnapshot(1, 20_000, 6_000);
+        Assert.Equal(6_000, ScoreboardRatingSelector.SelectTp(snapshot, true, new ScoreboardRankConfig()));
+    }
+
+    [Fact]
+    public void ScoreboardFallsBackToGlobalTpOutsideSeasonOrBeforeSeasonBalanceExists()
+    {
+        var config = new ScoreboardRankConfig();
+        Assert.Equal(20_000, ScoreboardRatingSelector.SelectTp(new(1, 20_000, null), true, config));
+        Assert.Equal(20_000, ScoreboardRatingSelector.SelectTp(new(1, 20_000, 6_000), false, config));
+    }
+
+    [Fact]
+    public void ScoreboardCanRefuseGlobalFallbackDuringAnActiveSeason()
+    {
+        var config = new ScoreboardRankConfig { FallbackToGlobal = false };
+        Assert.Null(ScoreboardRatingSelector.SelectTp(new(1, 20_000, null), true, config));
+    }
+
+    [Fact]
+    public void DefaultRatingContainsTheTenProductTiersInOrder()
+    {
+        var tiers = new RatingConfig().Tiers;
+        Assert.Equal(10, tiers.Count);
+        Assert.Equal(new[] { "Recruit", "Soldier", "Trooper", "Veteran", "Warrior", "Warlord", "Phantom", "Supreme", "Conquer", "Immortal" }, tiers.Select(x => x.Name));
+        Assert.Equal(Enumerable.Range(1, 10), tiers.Select(x => x.Id));
+    }
+
+    [Fact]
+    public void InvalidScoreboardSkillGroupRangeAndRefreshAreRejected()
+    {
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Rating.Scoreboard.SkillGroupBaseId = 18;
+        settings.Rating.Scoreboard.RefreshSeconds = 1;
+        var result = ConfigValidator.Validate(ValidConfig(), settings);
+        Assert.Contains(result.Errors, value => value.Contains("SkillGroupBaseId"));
+        Assert.Contains(result.Errors, value => value.Contains("RefreshSeconds"));
     }
 
     [Fact]
