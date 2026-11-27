@@ -230,30 +230,69 @@ public sealed class DomainTests
     }
 
     [Theory]
-    [InlineData(0, "Recruit")]
-    [InlineData(-50, "Recruit")]
-    [InlineData(999, "Recruit")]
-    [InlineData(1000, "Soldier")]
-    [InlineData(2999, "Soldier")]
-    [InlineData(3000, "Trooper")]
-    [InlineData(5999, "Trooper")]
-    [InlineData(6000, "Veteran")]
-    [InlineData(9999, "Veteran")]
-    [InlineData(10000, "Warrior")]
-    [InlineData(14999, "Warrior")]
-    [InlineData(15000, "Warlord")]
-    [InlineData(22499, "Warlord")]
-    [InlineData(22500, "Phantom")]
-    [InlineData(32499, "Phantom")]
-    [InlineData(32500, "Supreme")]
-    [InlineData(44999, "Supreme")]
-    [InlineData(45000, "Conquer")]
-    [InlineData(59999, "Conquer")]
-    [InlineData(60000, "Immortal")]
-    [InlineData(90000, "Immortal")]
+    [InlineData(-50, "Silver I")]
+    [InlineData(0, "Silver I")]
+    [InlineData(499, "Silver I")]
+    [InlineData(500, "Silver II")]
+    [InlineData(999, "Silver II")]
+    [InlineData(1000, "Silver III")]
+    [InlineData(1749, "Silver III")]
+    [InlineData(1750, "Silver IV")]
+    [InlineData(2749, "Silver IV")]
+    [InlineData(2750, "Silver Elite")]
+    [InlineData(3999, "Silver Elite")]
+    [InlineData(4000, "Silver Elite Master")]
+    [InlineData(5499, "Silver Elite Master")]
+    [InlineData(5500, "Gold Nova I")]
+    [InlineData(7499, "Gold Nova I")]
+    [InlineData(7500, "Gold Nova II")]
+    [InlineData(9999, "Gold Nova II")]
+    [InlineData(10000, "Gold Nova III")]
+    [InlineData(12999, "Gold Nova III")]
+    [InlineData(13000, "Gold Nova Master")]
+    [InlineData(16499, "Gold Nova Master")]
+    [InlineData(16500, "Master Guardian I")]
+    [InlineData(20499, "Master Guardian I")]
+    [InlineData(20500, "Master Guardian II")]
+    [InlineData(24999, "Master Guardian II")]
+    [InlineData(25000, "Master Guardian Elite")]
+    [InlineData(29999, "Master Guardian Elite")]
+    [InlineData(30000, "Distinguished Master Guardian")]
+    [InlineData(35999, "Distinguished Master Guardian")]
+    [InlineData(36000, "Legendary Eagle")]
+    [InlineData(42999, "Legendary Eagle")]
+    [InlineData(43000, "Legendary Eagle Master")]
+    [InlineData(50999, "Legendary Eagle Master")]
+    [InlineData(51000, "Supreme Master First Class")]
+    [InlineData(59999, "Supreme Master First Class")]
+    [InlineData(60000, "Global Elite")]
+    [InlineData(90000, "Global Elite")]
     public void RatingBoundariesResolveCorrectly(long xp, string expected)
     {
         Assert.Equal(expected, RatingResolver.Resolve(xp, new RatingConfig()).Tier.Name);
+    }
+
+    [Theory]
+    [InlineData(200, "Silver I", "Silver II", 300)]
+    [InlineData(500, "Silver II", "Silver III", 500)]
+    [InlineData(59_999, "Supreme Master First Class", "Global Elite", 1)]
+    public void RatingReportsDistanceToNextLevel(long xp, string current, string next, long remaining)
+    {
+        var rating = RatingResolver.Resolve(xp, new RatingConfig());
+
+        Assert.Equal(current, rating.Tier.Name);
+        Assert.Equal(next, rating.NextTier!.Name);
+        Assert.Equal(remaining, rating.XpToNext);
+    }
+
+    [Fact]
+    public void HighestRatingHasNoNextLevel()
+    {
+        var rating = RatingResolver.Resolve(60_000, new RatingConfig());
+
+        Assert.Equal("Global Elite", rating.Tier.Name);
+        Assert.Null(rating.NextTier);
+        Assert.Null(rating.XpToNext);
     }
 
     [Fact]
@@ -288,12 +327,19 @@ public sealed class DomainTests
     }
 
     [Fact]
-    public void DefaultRatingContainsTheTenProductTiersInOrder()
+    public void DefaultRatingContainsAllEighteenCompetitiveTiersInOrder()
     {
         var tiers = new RatingConfig().Tiers;
-        Assert.Equal(10, tiers.Count);
-        Assert.Equal(new[] { "Recruit", "Soldier", "Trooper", "Veteran", "Warrior", "Warlord", "Phantom", "Supreme", "Conquer", "Immortal" }, tiers.Select(x => x.Name));
-        Assert.Equal(Enumerable.Range(1, 10), tiers.Select(x => x.Id));
+        Assert.Equal(18, tiers.Count);
+        Assert.Equal(new[]
+        {
+            "Silver I", "Silver II", "Silver III", "Silver IV", "Silver Elite", "Silver Elite Master",
+            "Gold Nova I", "Gold Nova II", "Gold Nova III", "Gold Nova Master", "Master Guardian I",
+            "Master Guardian II", "Master Guardian Elite", "Distinguished Master Guardian", "Legendary Eagle",
+            "Legendary Eagle Master", "Supreme Master First Class", "Global Elite"
+        }, tiers.Select(x => x.Name));
+        Assert.Equal(Enumerable.Range(1, 18), tiers.Select(x => x.Id));
+        Assert.Equal(1, new ScoreboardRankConfig().SkillGroupBaseId);
     }
 
     [Fact]
@@ -305,6 +351,17 @@ public sealed class DomainTests
         var result = ConfigValidator.Validate(ValidConfig(), settings);
         Assert.Contains(result.Errors, value => value.Contains("SkillGroupBaseId"));
         Assert.Contains(result.Errors, value => value.Contains("RefreshSeconds"));
+    }
+
+    [Fact]
+    public void CustomScoreboardSkillGroupRangeRemainsSupported()
+    {
+        var settings = new HsGoStatsRuntimeSettings();
+        settings.Rating.Scoreboard.SkillGroupBaseId = 19_010_001;
+
+        var result = ConfigValidator.Validate(ValidConfig(), settings);
+
+        Assert.True(result.IsValid, string.Join(Environment.NewLine, result.Errors));
     }
 
     [Fact]

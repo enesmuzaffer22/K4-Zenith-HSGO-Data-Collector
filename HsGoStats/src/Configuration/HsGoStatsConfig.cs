@@ -119,16 +119,24 @@ public sealed class RatingConfig
     public ScoreboardRankConfig Scoreboard { get; set; } = new();
     public List<RatingTierConfig> Tiers { get; set; } =
     [
-        new(1, "Recruit", 0, "#B3B2B2"),
-        new(2, "Soldier", 1_000, "#BF8C47"),
-        new(3, "Trooper", 3_000, "#FFFFFF"),
-        new(4, "Veteran", 6_000, "#F8A815"),
-        new(5, "Warrior", 10_000, "#58C3E4"),
-        new(6, "Warlord", 15_000, "#8693C9"),
-        new(7, "Phantom", 22_500, "#E8375D"),
-        new(8, "Supreme", 32_500, "#8575B4"),
-        new(9, "Conquer", 45_000, "#EC651C"),
-        new(10, "Immortal", 60_000, "#E52421")
+        new(1, "Silver I", 0, "#B3B2B2"),
+        new(2, "Silver II", 500, "#B3B2B2"),
+        new(3, "Silver III", 1_000, "#B3B2B2"),
+        new(4, "Silver IV", 1_750, "#B3B2B2"),
+        new(5, "Silver Elite", 2_750, "#D6D6D6"),
+        new(6, "Silver Elite Master", 4_000, "#D6D6D6"),
+        new(7, "Gold Nova I", 5_500, "#F8A815"),
+        new(8, "Gold Nova II", 7_500, "#F8A815"),
+        new(9, "Gold Nova III", 10_000, "#F8A815"),
+        new(10, "Gold Nova Master", 13_000, "#F8A815"),
+        new(11, "Master Guardian I", 16_500, "#58C3E4"),
+        new(12, "Master Guardian II", 20_500, "#58C3E4"),
+        new(13, "Master Guardian Elite", 25_000, "#8693C9"),
+        new(14, "Distinguished Master Guardian", 30_000, "#8693C9"),
+        new(15, "Legendary Eagle", 36_000, "#8575B4"),
+        new(16, "Legendary Eagle Master", 43_000, "#8575B4"),
+        new(17, "Supreme Master First Class", 51_000, "#E8375D"),
+        new(18, "Global Elite", 60_000, "#E52421")
     ];
 }
 
@@ -137,7 +145,7 @@ public sealed record RatingTierConfig(int Id, string Name, long MinXP, string Co
 public sealed class ScoreboardRankConfig
 {
     public bool Enabled { get; set; } = true;
-    public int SkillGroupBaseId { get; set; } = 19_010_001;
+    public int SkillGroupBaseId { get; set; } = 1;
     public int RefreshSeconds { get; set; } = 5;
     public bool UseActiveSeason { get; set; } = true;
     public bool FallbackToGlobal { get; set; } = true;
@@ -178,6 +186,7 @@ public sealed class ChatCommandsConfig
     public ChatCommandConfig Season { get; set; } = new(true, ["!sezon"]);
     public ChatCommandConfig Missions { get; set; } = new(true, ["!gorevler"]);
     public ChatCommandConfig Leaderboard { get; set; } = new(true, ["!siralama"]) { CooldownSeconds = 10 };
+    public ChatCommandConfig Level { get; set; } = new(true, ["!seviye"]);
     public RoundStartReminderConfig RoundStartReminder { get; set; } = new();
     public bool ReplyPrivately { get; set; } = true;
 }

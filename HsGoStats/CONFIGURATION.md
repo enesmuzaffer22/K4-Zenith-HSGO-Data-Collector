@@ -30,7 +30,7 @@ Plugin revizyonları yaklaşık 30 saniyede bir denetler. Geçerli değişiklikl
 - `game_xp`: HSR olay ekonomisidir. Özel kill ödülleri toplanmaz; en yüksek eşleşen değer seçilir.
 - `rating`: minimum HSR, demotion davranışı, sıralı tier eşikleri/adları/HEX renkleri ve native scoreboard ayarlarıdır. `Scoreboard.Enabled`, `SkillGroupBaseId`, `RefreshSeconds`, aktif sezon önceliği ve genel TP fallback davranışı buradan yönetilir.
 - `weekly_missions`: aktif sezonla sınırlı rotasyon, ödül hedefleri, dışlanan silahlar ve 100 görevlik katalogdur. İlk/son görev haftası sezon sınırında kırpılır.
-- `chat_commands`: `!sezon`, `!gorevler`, `!siralama`, komut cooldown'u, özel yanıt ve raund başı hatırlatmasıdır.
+- `chat_commands`: `!sezon`, `!seviye`, `!gorevler`, `!siralama`, komut cooldown'u, özel yanıt ve raund başı hatırlatmasıdır.
 - `tracking`: istatistik olayları, warmup/bot/team-kill filtreleri ve map/weapon boyutlarıdır.
 - `bans`: yalnız arşiv yetenekleridir; import ve enforcement desteklenmez.
 - `persistence`: bounded queue, batch, retry/backoff ve dayanıklı spool ayarlarıdır.
@@ -45,3 +45,9 @@ Mevcut kurulumda çalışma ayarlarının kaynağı DB olduğu için yalnız DLL
 Scoreboard ikonları için `scoreboard-addon/README.md` akışını izleyin. Plugin `FollowCS2ServerGuidelines` değerini değiştirmez. Native competitive rank alanına yazmak GSLT riski taşır ve sunucu sahibinin açık kararıdır.
 
 TAB açıldığında rankları görünür kılmak için güncel `FakeRanks-RevealAll` Metamod eklentisi ayrıca kurulmalıdır. HsGoStats 1.5.4 ve sonrasında reveal user-message göndermez. HsGoStats 1.5.5, DB'yi daha sık sorgulamadan önbellekteki competitive rank netprop değerlerini her tick doğrular ve yalnız başka bir sistem/oyun motoru alanları değiştirdiğinde yeniden uygular.
+
+## 1.6.0 native Competitive rank yükseltmesi
+
+`sql/migrate_1.6.0_native_competitive_ranks.sql`, `rating.tiers` listesini Silver I ile Global Elite arasındaki 18 CS2 Competitive seviyesiyle değiştirir ve `scoreboard.skillGroupBaseId=1` yapar. Yeni tablo veya kolon oluşturmaz; genel/sezon TP bakiyelerine dokunmaz. Görünen seviye mevcut TP'nin yeni eşiklere göre yeniden çözülmesiyle değişir.
+
+1.6.0 için özel SVG Workshop addonu gerekmez. Eski addon yalnız özel `19010001+` ikonlarını içeriyorsa MultiAddonManager yükleme listesinden çıkarılabilir. MultiAddonManager başka içerikler için kullanılmaya devam edebilir. `FakeRanks-RevealAll` ise HsGoStats'ın yazdığı rankları TAB açıldığında görünür kıldığı için kurulu kalmalıdır.

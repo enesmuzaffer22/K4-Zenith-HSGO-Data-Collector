@@ -16,7 +16,7 @@ public sealed partial class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStat
 {
     public override string ModuleName => "HSGo Stats Collector";
     public override string ModuleAuthor => "HSGo / K4-Zenith contributors";
-    public override string ModuleVersion => "1.5.5";
+    public override string ModuleVersion => "1.6.1";
     public override string ModuleDescription => "Standalone TP, weekly mission, season and MySQL statistics collector.";
 
     public HsGoStatsConfig Config { get; set; } = new();
@@ -739,6 +739,7 @@ public sealed partial class HsGoStatsPlugin : BasePlugin, IPluginConfig<HsGoStat
         if (_settings.ChatCommands.Missions.Enabled)
             foreach (var alias in _settings.ChatCommands.Missions.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
                 if (_registeredMissionCommands.Add(alias)) AddCommand(alias, "Haftalık görevleri gösterir", OnMissionsCommand);
+        RegisterLevelCommands();
         RegisterLeaderboardCommands();
     }
 

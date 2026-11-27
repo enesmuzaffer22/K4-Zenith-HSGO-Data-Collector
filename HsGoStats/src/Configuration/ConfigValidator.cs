@@ -47,6 +47,7 @@ public static class ConfigValidator
         if (rawChat!.Season is null || rawChat.Season.Aliases is null) errors.Add("ChatCommands.Season and its aliases cannot be null.");
         if (rawChat.Missions is null || rawChat.Missions.Aliases is null) errors.Add("ChatCommands.Missions and its aliases cannot be null.");
         if (rawChat.Leaderboard is null || rawChat.Leaderboard.Aliases is null) errors.Add("ChatCommands.Leaderboard and its aliases cannot be null.");
+        if (rawChat.Level is null || rawChat.Level.Aliases is null) errors.Add("ChatCommands.Level and its aliases cannot be null.");
         if (rawChat.RoundStartReminder is null) errors.Add("ChatCommands.RoundStartReminder cannot be null.");
         if (errors.Count > bootstrapValidation.Errors.Count) return new(errors, warnings);
 
@@ -69,6 +70,7 @@ public static class ConfigValidator
         var seasonAliases = chat.Season!.Aliases!;
         var missionAliases = chat.Missions!.Aliases!;
         var leaderboardAliases = chat.Leaderboard!.Aliases!;
+        var levelAliases = chat.Level!.Aliases!;
 
         try { _ = TimeZoneInfo.FindSystemTimeZoneById(seasonConfig.Timezone); }
         catch { errors.Add($"Season.Timezone '{seasonConfig.Timezone}' is not available on this host."); }
@@ -112,8 +114,12 @@ public static class ConfigValidator
 
         if (rating.MinimumXP < 0) errors.Add("Rating.MinimumXP cannot be negative.");
         if (rating.StartingXP < rating.MinimumXP) errors.Add("Rating.StartingXP cannot be lower than Rating.MinimumXP.");
-        if (scoreboard.SkillGroupBaseId <= 18) errors.Add("Rating.Scoreboard.SkillGroupBaseId must be greater than 18 to avoid built-in skill groups.");
-        if ((long)scoreboard.SkillGroupBaseId + Math.Max(0, tiers.Count - 1) > int.MaxValue)
+        var lastSkillGroupId = (long)scoreboard.SkillGroupBaseId + Math.Max(0, tiers.Count - 1);
+        if (scoreboard.SkillGroupBaseId < 1)
+            errors.Add("Rating.Scoreboard.SkillGroupBaseId must be positive.");
+        else if (scoreboard.SkillGroupBaseId <= 18 && lastSkillGroupId > 18)
+            errors.Add("Rating.Scoreboard.SkillGroupBaseId and tier count must stay within native competitive skill groups 1-18.");
+        if (lastSkillGroupId > int.MaxValue)
             errors.Add("Rating.Scoreboard skill-group range exceeds Int32.");
         if (scoreboard.RefreshSeconds is < 2 or > 60) errors.Add("Rating.Scoreboard.RefreshSeconds must be between 2 and 60.");
         if (tiers.Count == 0) errors.Add("Rating.Tiers must contain at least one tier.");
@@ -164,6 +170,7 @@ public static class ConfigValidator
         ValidateAliases(seasonAliases, "ChatCommands.Season", errors);
         ValidateAliases(missionAliases, "ChatCommands.Missions", errors);
         ValidateAliases(leaderboardAliases, "ChatCommands.Leaderboard", errors);
+        ValidateAliases(levelAliases, "ChatCommands.Level", errors);
         if (chat.Leaderboard.CooldownSeconds is < 0 or > 300)
             errors.Add("ChatCommands.Leaderboard.CooldownSeconds must be between 0 and 300.");
 

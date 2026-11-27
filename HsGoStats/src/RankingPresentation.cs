@@ -12,6 +12,7 @@ namespace HsGoStats;
 public sealed partial class HsGoStatsPlugin
 {
     private readonly HashSet<string> _registeredLeaderboardCommands = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _registeredLevelCommands = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<ulong, DateTimeOffset> _leaderboardCooldowns = [];
     private readonly HashSet<ulong> _scoreboardApplied = [];
     private readonly Dictionary<ulong, int> _scoreboardSkillGroups = [];
@@ -27,6 +28,70 @@ public sealed partial class HsGoStatsPlugin
         foreach (var alias in _settings.ChatCommands.Leaderboard.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
             if (_registeredLeaderboardCommands.Add(alias))
                 AddCommand(alias, "Genel ve aktif sezon TP sıralamasını gösterir", OnLeaderboardCommand);
+    }
+
+    private void RegisterLevelCommands()
+    {
+        if (!_settings.ChatCommands.Level.Enabled) return;
+        foreach (var alias in _settings.ChatCommands.Level.Aliases.Select(CommandName).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (_registeredLevelCommands.Add(alias))
+                AddCommand(alias, "Mevcut seviyeyi ve sonraki seviyeye kalan TP'yi gösterir", OnLevelCommand);
+    }
+
+    private void OnLevelCommand(CCSPlayerController? player, CommandInfo info)
+    {
+        if (!_settings.ChatCommands.Level.Enabled)
+        {
+            info.ReplyToCommand("[HsGo] Seviye komutu kapalı.");
+            return;
+        }
+        if (!_settings.Rating.Enabled)
+        {
+            info.ReplyToCommand("[HsGo] TP sistemi kapalı.");
+            return;
+        }
+        if (!TryIdentity(player, out var identity) || _missionRepository is null || _lifetime is null)
+        {
+            info.ReplyToCommand("[HsGo] Bu komut yalnızca bağlı insan oyuncular tarafından kullanılabilir.");
+            return;
+        }
+
+        var observed = DateTimeOffset.UtcNow;
+        var season = ActiveSeason(observed);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _missionRepository.ProcessAsync(new MissionSignal(Guid.NewGuid(), observed, identity, "Ensure",
+                    season?.Id, season is not null, CanGrantSeason(identity, season),
+                    ActiveSeasonStartsAt: season?.StartsAtUtc, ActiveSeasonEndsAt: season?.EndsAtUtc), _lifetime.Token);
+                var snapshot = (await _missionRepository.GetScoreboardTpAsync(
+                    [identity.SteamId64], season, _lifetime.Token)).Single();
+                var tp = ScoreboardRatingSelector.SelectTp(snapshot, season is not null, _settings.Rating.Scoreboard)
+                    ?? snapshot.GlobalTp;
+                var rating = RatingResolver.Resolve(tp, _settings.Rating);
+
+                Server.NextFrame(() =>
+                {
+                    if (player is null || !player.IsValid) return;
+                    var remaining = rating.NextTier is null
+                        ? $"{ChatColors.Gold}En yüksek seviyedesin.{ChatColors.Default}"
+                        : $"Bir sonraki seviye için {ChatColors.Green}{rating.XpToNext:N0} TP{ChatColors.Default} kaldı ({TierLabel(rating.NextTier)})";
+                    CommandReply(player,
+                        $"{HsGoPrefix()}{ChatColors.Gold}Seviye:{ChatColors.Default} {TierLabel(rating.Tier)} — {remaining}");
+                });
+            }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Level command failed for {SteamId}", identity.SteamId64);
+                Server.NextFrame(() =>
+                {
+                    if (player is not null && player.IsValid)
+                        CommandReply(player, $"{HsGoPrefix()}{ChatColors.LightRed}Seviye bilgisi şu anda yüklenemedi; lütfen tekrar deneyin.{ChatColors.Default}");
+                });
+            }
+        });
     }
 
     private void OnLeaderboardCommand(CCSPlayerController? player, CommandInfo info)
@@ -253,16 +318,14 @@ public sealed partial class HsGoStatsPlugin
 
     private static char TierChatColor(int tierId) => tierId switch
     {
-        1 => ChatColors.Grey,
-        2 => ChatColors.Orange,
-        3 => ChatColors.White,
-        4 => ChatColors.Gold,
-        5 => ChatColors.LightBlue,
-        6 => ChatColors.BlueGrey,
-        7 => ChatColors.Magenta,
-        8 => ChatColors.Purple,
-        9 => ChatColors.Orange,
-        10 => ChatColors.Red,
+        <= 4 => ChatColors.Grey,
+        <= 6 => ChatColors.White,
+        <= 10 => ChatColors.Gold,
+        <= 12 => ChatColors.LightBlue,
+        <= 14 => ChatColors.BlueGrey,
+        <= 16 => ChatColors.Purple,
+        17 => ChatColors.Magenta,
+        18 => ChatColors.Red,
         _ => ChatColors.Default
     };
 

@@ -33,3 +33,5 @@ Bakım penceresinde sağlayıcının snapshot özelliğini veya `mysqldump --sin
 `hsgo_ingested_events` büyür. Retention otomatik silinmez; spool'un maksimum yeniden oynatma ufkundan daha eski satırlar ancak yedek ve bakım prosedürüyle arşivlenmelidir.
 
 1.5.0 yeni tablo veya kolon eklemez. Mevcut `rating` ve `chat_commands` setting JSON'ları `sql/migrate_1.5.0_ranks_scoreboard.sql` ile güncellenir; genel/sezon TP satırlarına dokunulmaz.
+
+1.6.0 da şema değişikliği yapmaz. `sql/migrate_1.6.0_native_competitive_ranks.sql` yalnız `rating` setting JSON'unu 18 native Competitive tier ve `skillGroupBaseId=1` ile günceller. Plugin geçerli revizyonu alınca `hsgo_rating_tiers` satırlarını senkronlar; `hsgo_player_global_hsr` ve `hsgo_player_season_hsr` bakiyeleri korunur.

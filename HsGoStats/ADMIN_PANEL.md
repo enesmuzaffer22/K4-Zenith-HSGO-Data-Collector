@@ -22,9 +22,9 @@ Etkilenen satır sayısı sıfırsa kayıt başka bir admin tarafından değişt
 
 ## Rank ve scoreboard alanları
 
-`rating` editörü artık on tier ile iç içe `scoreboard` nesnesini korumalıdır. Panel bilinmeyen JSON alanlarını silmemeli; özellikle `scoreboard.enabled`, `skillGroupBaseId`, `refreshSeconds`, `useActiveSeason` ve `fallbackToGlobal` alanlarını round-trip etmelidir. `chat_commands` editörü de `leaderboard` komutunun `enabled`, `aliases` ve `cooldownSeconds` alanlarını korumalıdır.
+`rating` editörü 18 Competitive tier ile iç içe `scoreboard` nesnesini korumalıdır. Panel bilinmeyen JSON alanlarını silmemeli; özellikle `scoreboard.enabled`, `skillGroupBaseId`, `refreshSeconds`, `useActiveSeason` ve `fallbackToGlobal` alanlarını round-trip etmelidir. Native Competitive düzeninde `skillGroupBaseId=1` kullanılır. `chat_commands` editörü `leaderboard` komutunun `enabled`, `aliases` ve `cooldownSeconds` alanlarıyla birlikte `level` komutunun `enabled` ve `aliases` alanlarını da korumalıdır.
 
-Web formunda bu alanlar henüz yoksa 1.5.0 migration SQL'inden sonra ham JSON'u eski form modeliyle yeniden kaydetmeyin; eski form yeni alanları düşürebilir. Form güncellenene kadar bu iki setting satırını salt okunur göstermek veya bilinmeyen alanları koruyan merge kullanmak güvenlidir.
+Web formunda bu alanlar henüz yoksa 1.6.0 migration SQL'inden sonra ham JSON'u eski form modeliyle yeniden kaydetmeyin; eski form yeni alanları veya 11–18 tierlerini düşürebilir. Form güncellenene kadar bu iki setting satırını salt okunur göstermek veya bilinmeyen alanları koruyan merge kullanmak güvenlidir.
 
 ## Son 24 saat aktivitesi
 

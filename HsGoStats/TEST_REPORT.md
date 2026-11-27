@@ -147,3 +147,12 @@ Sandbox içindeki ilk VSTest denemesi testhost IPC kısıtı nedeniyle bağlanam
 - Her tick yalnız alanları beklenen değerden farklı olan oyuncular yeniden yazılıyor; tick döngüsünde DB veya başka I/O yapılmıyor.
 - Competitive görünürlük değeri güncel LevelRanksFakeRank ile eşleşecek şekilde `CompetitiveWins=777` olarak ayarlandı.
 - `css_hsgo_status` çıktısına `maintained` ve `repairs` sayaçları eklendi.
+
+## 2026-11-27 — Native Competitive rank sistemi 1.6.0
+
+- Varsayılan tier listesi Silver I ile Global Elite arasındaki 18 CS2 Competitive rankına genişletildi.
+- `skillGroupBaseId=1` ile yerleşik istemci ikonları kullanılıyor; özel SVG/Workshop addonu gerekmiyor.
+- Native `1-18` aralığı doğrulanırken eski `19+` custom skill-group yapılandırmaları geriye uyumlu tutuldu.
+- Genel ve sezon TP seçimi değişmedi; migration yalnız `rating` setting JSON'unu güncelliyor ve TP bakiyelerine dokunmuyor.
+- Tier sınırları, 18 tier sırası, native/custom skill-group doğrulaması ve mevcut domain davranışları dahil `dotnet test`: **81/81 PASS**.
+- Release archive: `HsGoStats-v1.6.0.zip`, 634284 bytes, SHA-256 `09D6C28CF2C4CDA5E29A3924FF238A710D1206634681F274A50F616E3157E0BC`.
